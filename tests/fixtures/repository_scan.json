@@ -1,0 +1,50 @@
+{
+  "execution_id": "synthetic-repository",
+  "asset": {
+    "type": "repository",
+    "locator": "https://example.invalid/synthetic/repo"
+  },
+  "scanner": {
+    "name": "synthetic-scanner",
+    "version": "0.0.0-test"
+  },
+  "status": "success",
+  "findings": [
+    {
+      "asset": {
+        "type": "repository",
+        "locator": "https://example.invalid/synthetic/repo"
+      },
+      "component": {
+        "name": "synthetic-package",
+        "ecosystem": "PyPI",
+        "installed_version": "1.0+vendor:revision",
+        "location": "requirements.txt"
+      },
+      "vulnerability": {
+        "primary_id": "SYNTHETIC-2026-0001",
+        "aliases": [
+          "SYNTHETIC-ALIAS-001"
+        ],
+        "references": [
+          "https://example.invalid/advisories/001"
+        ]
+      },
+      "evidence": {
+        "scanner": {
+          "name": "synthetic-scanner",
+          "version": "0.0.0-test"
+        },
+        "observed_at": "2026-10-27T09:30:00-07:00",
+        "target": ".",
+        "artifact_reference": "artifact:synthetic/repository/report.json"
+      },
+      "fix": {
+        "status": "available",
+        "fixed_versions": [
+          "2.0+vendor:revision"
+        ]
+      }
+    }
+  ]
+}
