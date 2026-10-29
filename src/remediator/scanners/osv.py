@@ -1,6 +1,10 @@
 """OSV-Scanner v2 source JSON adapter and controlled local invocation."""
 
 import json
+import math
+import os
+import selectors
+import signal
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -22,6 +26,7 @@ from remediator.domain import (
     ScanStatus,
     Vulnerability,
 )
+from remediator.output import directory, private_output
 
 
 class Wire(BaseModel):
@@ -168,9 +173,13 @@ class OSVScanner:
         timeout: float = 120,
         max_output_bytes: int = 10 * 1024 * 1024,
     ) -> None:
-        if timeout <= 0 or max_output_bytes <= 0:
-            raise ValueError("timeout and output bound must be positive")
-        self.executable = executable
+        if not math.isfinite(timeout) or timeout <= 0 or max_output_bytes <= 0:
+            raise ValueError(
+                "timeout must be finite and positive; output bound must be positive"
+            )
+        self.executable = (
+            str(Path(executable).resolve()) if os.sep in executable else executable
+        )
         self.timeout = timeout
         self.max_output_bytes = max_output_bytes
 
@@ -178,66 +187,94 @@ class OSVScanner:
         target = target.resolve(strict=True)
         if not target.is_dir():
             raise ValueError("target must be a local directory")
-        artifact_directory = artifact_directory.resolve()
-        if artifact_directory == target or target in artifact_directory.parents:
+        if os.name != "posix":
+            raise ValueError("scanner process-group cleanup requires POSIX")
+        # Validate every path component before resolving, including parent symlinks.
+        artifact_directory = Path(os.path.abspath(artifact_directory))
+        resolved_artifacts = artifact_directory.resolve()
+        if resolved_artifacts == target or target in resolved_artifacts.parents:
             raise ValueError("artifacts must be outside the scanned target")
-        artifact_directory.mkdir(parents=True, exist_ok=True)
+        with directory(artifact_directory, create=True):
+            pass
         execution_id = str(uuid4())
         artifact = artifact_directory / execution_id
         artifact.mkdir(mode=0o700)
         errors: list[str] = []
-        raw = b""
-        # Files avoid unbounded PIPE buffering. Retained artifacts are capped; temporary
-        # spools can overshoot between polls, so this is not a disk quota/sandbox.
-        with TemporaryDirectory() as spool:
-            stdout_path, stderr_path = Path(spool) / "stdout", Path(spool) / "stderr"
-            with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        code: int | None = None
+        streams = [bytearray(), bytearray()]
+        # --config is a global override in v2.3.0, not a default/fallback config.
+        with TemporaryDirectory(prefix="remediator-osv-") as controlled:
+            config = Path(controlled) / "osv-scanner.toml"
+            with private_output(config) as handle:
+                handle.write(b"# Adapter-owned: no exclusions or package overrides.\n")
+            try:
+                process = subprocess.Popen(
+                    [
+                        self.executable,
+                        "scan",
+                        "source",
+                        "--format=json",
+                        "--no-resolve",
+                        "--recursive",
+                        "--config",
+                        str(config),
+                        str(target),
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=False,
+                    start_new_session=True,
+                    cwd=controlled,
+                )
                 try:
-                    with subprocess.Popen(
-                        [
-                            self.executable,
-                            "scan",
-                            "source",
-                            "--format=json",
-                            "--no-resolve",
-                            str(target),
-                        ],
-                        stdout=stdout,
-                        stderr=stderr,
-                        shell=False,
-                    ) as process:
+                    assert process.stdout is not None and process.stderr is not None
+                    with selectors.DefaultSelector() as selector:
+                        for index, pipe in enumerate((process.stdout, process.stderr)):
+                            os.set_blocking(pipe.fileno(), False)
+                            selector.register(pipe, selectors.EVENT_READ, index)
                         deadline = time.monotonic() + self.timeout
-                        while process.poll() is None:
-                            if time.monotonic() >= deadline:
+                        while selector.get_map() or process.poll() is None:
+                            remaining_time = deadline - time.monotonic()
+                            if remaining_time <= 0:
                                 errors.append("OSV-Scanner timed out")
-                                process.kill()
                                 break
-                            if (
-                                stdout_path.stat().st_size + stderr_path.stat().st_size
-                                > self.max_output_bytes
-                            ):
-                                errors.append("OSV-Scanner output limit exceeded")
-                                process.kill()
+                            overflow = False
+                            for key, _ in selector.select(min(remaining_time, 0.05)):
+                                data = os.read(key.fd, 65536)
+                                if not data:
+                                    selector.unregister(key.fileobj)
+                                    continue
+                                remaining = self.max_output_bytes - sum(
+                                    map(len, streams)
+                                )
+                                streams[key.data].extend(data[:remaining])
+                                if len(data) > remaining:
+                                    errors.append("OSV-Scanner output limit exceeded")
+                                    overflow = True
+                                    break
+                            if overflow:
                                 break
-                            time.sleep(0.02)
-                        code = process.wait()
-                        if code not in (0, 1):
-                            errors.append(f"OSV-Scanner execution failed (exit {code})")
-                except OSError as exc:
-                    errors.append(f"cannot execute OSV-Scanner: {exc}")
-            remaining = self.max_output_bytes
-            for name, path in (
-                ("stdout.json", stdout_path),
-                ("stderr.txt", stderr_path),
-            ):
-                with path.open("rb") as handle:
-                    data = handle.read(remaining)
-                (artifact / name).write_bytes(data)
-                remaining -= len(data)
-                if path.stat().st_size > len(data):
-                    errors.append(f"{name} truncated at output limit")
-                if name == "stdout.json":
-                    raw = data
+                finally:
+                    # Kill the session's process group even if its leader has exited.
+                    # Descendants holding inherited pipes must not outlive a scan.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    code = process.wait()
+                    if process.stdout is not None:
+                        process.stdout.close()
+                    if process.stderr is not None:
+                        process.stderr.close()
+                if code not in (0, 1):
+                    errors.append(f"OSV-Scanner execution failed (exit {code})")
+            except OSError as exc:
+                errors.append(f"cannot execute OSV-Scanner: {exc}")
+        for name, captured in zip(("stdout.json", "stderr.txt"), streams, strict=True):
+            with private_output(artifact / name) as handle:
+                handle.write(captured)
+        raw = bytes(streams[0])
         result = normalize(
             raw,
             target=target,

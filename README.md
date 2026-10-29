@@ -1,10 +1,10 @@
 # Project Remediator
 
 An open-source vulnerability remediation and verification engine, currently at
-the API foundation and vulnerability domain-contract stage. A health endpoint,
-scanner-independent domain models, and development tooling are implemented.
-Scanning, remediation, verification, storage, workers, and AI integrations are
-not implemented.
+the local dependency-scanning stage. A health endpoint, scanner-independent
+domain models, a developer OSV-Scanner CLI, and development tooling are
+implemented. Remediation, verification, storage, workers, and AI integrations
+are not implemented.
 
 **Experimental and not production-ready.**
 
@@ -103,4 +103,9 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 The first scanner adapter supports controlled local source scans with OSV-Scanner.
 See [installation, CLI usage, mapping decisions and optional live tests](docs/osv-scanner.md).
-No API scan endpoint or remediation is included.
+The CLI requires POSIX process groups and secure file creation (validated on Linux).
+Scans recurse into nested manifests, use an adapter-owned OSV configuration, and
+bound combined stdout/stderr with `--max-output-bytes`. Output files must be new,
+outside the target, and reached without symlinks; they are created with mode 0600.
+The scanner still honors `.gitignore`, so success does not guarantee complete
+repository coverage. No API scan endpoint or remediation is included.
