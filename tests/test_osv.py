@@ -179,7 +179,11 @@ time.sleep(60)
     # A killed orphan can briefly remain as a zombie until the host reaps it.
     for _ in range(100):
         stat = Path(f"/proc/{pid}/stat")
-        if not stat.exists() or stat.read_text().split()[2] == "Z":
+        try:
+            state = stat.read_text().split()[2]
+        except FileNotFoundError:
+            break
+        if state == "Z":
             break
         time.sleep(0.01)
     else:
