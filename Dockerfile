@@ -11,7 +11,9 @@ ENV UV_PYTHON_DOWNLOADS=never \
 
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src/ ./src/
-RUN uv sync --locked --no-dev --no-editable \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    uv sync --locked --no-dev --no-editable \
     && groupadd --system app \
     && useradd --system --gid app --no-create-home app
 
