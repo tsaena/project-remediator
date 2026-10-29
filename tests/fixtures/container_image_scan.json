@@ -1,0 +1,45 @@
+{
+  "execution_id": "synthetic-container_image",
+  "asset": {
+    "type": "container_image",
+    "locator": "example.invalid/synthetic/image@sha256:abc123"
+  },
+  "scanner": {
+    "name": "synthetic-scanner"
+  },
+  "status": "success",
+  "findings": [
+    {
+      "asset": {
+        "type": "container_image",
+        "locator": "example.invalid/synthetic/image@sha256:abc123"
+      },
+      "component": {
+        "name": "synthetic-package",
+        "ecosystem": "Debian",
+        "installed_version": "1.0+vendor:revision",
+        "location": "/usr/lib/synthetic"
+      },
+      "vulnerability": {
+        "primary_id": "SYNTHETIC-2026-0001",
+        "aliases": [
+          "SYNTHETIC-ALIAS-001"
+        ],
+        "references": [
+          "https://example.invalid/advisories/001"
+        ]
+      },
+      "evidence": {
+        "scanner": {
+          "name": "synthetic-scanner"
+        },
+        "observed_at": "2026-10-27T09:30:00-07:00",
+        "target": "/usr/lib/synthetic",
+        "artifact_reference": "artifact:synthetic/container_image/report.json"
+      },
+      "fix": {
+        "status": "no_fix"
+      }
+    }
+  ]
+}

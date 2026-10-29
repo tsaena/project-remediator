@@ -1,9 +1,10 @@
 # Project Remediator
 
 An open-source vulnerability remediation and verification engine, currently at
-the initial API foundation stage. Only a health endpoint and development tooling
-are implemented. Scanning, remediation, verification, storage, workers, and AI
-integrations are not implemented.
+the API foundation and vulnerability domain-contract stage. A health endpoint,
+scanner-independent domain models, and development tooling are implemented.
+Scanning, remediation, verification, storage, workers, and AI integrations are
+not implemented.
 
 **Experimental and not production-ready.**
 
@@ -73,8 +74,9 @@ docker compose config --quiet
 docker build -t project-remediator:local .
 ```
 
-Tests use HTTPX's ASGI transport in-process and require no Docker or external
-services. They check the health response, documentation page, and OpenAPI route.
+Tests require no Docker or external services. API tests use HTTPX's ASGI
+transport in-process to check the health response, documentation page, and
+OpenAPI route. Domain tests validate synthetic fixtures and model invariants.
 GitHub Actions runs lint, formatting, type checking, tests, and a Docker build on
 pull requests and pushes to `main`.
 
@@ -86,6 +88,12 @@ uv run ruff format .
 
 When intentionally changing dependencies, update `pyproject.toml`, run `uv lock`
 and `uv sync --locked`, and commit both `pyproject.toml` and `uv.lock`.
+
+## Domain models
+
+See [the domain model guide](docs/domain-model.md) for normalized vulnerability,
+provenance, fix-information, and scan-status contracts and synthetic examples.
+The domain contracts add no HTTP endpoints.
 
 ## License
 
