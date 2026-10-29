@@ -98,3 +98,9 @@ The domain contracts add no HTTP endpoints.
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
+
+## Developer dependency scans
+
+The first scanner adapter supports controlled local source scans with OSV-Scanner.
+See [installation, CLI usage, mapping decisions and optional live tests](docs/osv-scanner.md).
+No API scan endpoint or remediation is included.
