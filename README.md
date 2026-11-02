@@ -8,6 +8,14 @@ are not implemented.
 
 **Experimental and not production-ready.**
 
+## Vision and roadmap
+
+[The vision](docs/vision.md) defines the project's goals, workflow, and
+engineering principles. [The roadmap](docs/roadmap.md) describes the milestone
+sequence and current development direction. Contributors and coding agents
+should read both before proposing significant changes; Claude Code also reads
+[`CLAUDE.md`](CLAUDE.md).
+
 ## Prerequisites
 
 - Python 3.12 (or allow uv to install it automatically).
