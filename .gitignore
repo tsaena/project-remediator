@@ -10,3 +10,6 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+
+# Local sensitive scanner artifacts
+.remediator-artifacts/

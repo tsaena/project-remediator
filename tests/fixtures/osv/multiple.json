@@ -1,0 +1,48 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "/repo/requirements.txt",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "Django",
+            "ecosystem": "PyPI",
+            "version": "2.2.0"
+          },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-example",
+              "aliases": [
+                "CVE-2099-0001"
+              ],
+              "summary": "Synthetic advisory",
+              "references": [
+                {
+                  "url": "https://example.org/advisory"
+                }
+              ]
+            },
+            {
+              "id": "OSV-second"
+            }
+          ]
+        },
+        {
+          "package": {
+            "name": "other",
+            "ecosystem": "PyPI",
+            "version": "2.2.0"
+          },
+          "vulnerabilities": [
+            {
+              "id": "OSV-third"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
