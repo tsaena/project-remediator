@@ -147,6 +147,8 @@ class CoverageReason(StrEnum):
     MISSING_VERSION = "missing_version"
     IMPRECISE_CONSTRAINT = "imprecise_constraint"
     NOT_DECLARED_IN_MANIFEST = "not_declared_in_manifest"
+    UNINSPECTED_INCLUDE = "uninspected_include"
+    UNRECOGNIZED_DECLARATION = "unrecognized_declaration"
     PRECISION_UNDETERMINED = "precision_undetermined"
     ECOSYSTEM_OUTSIDE_SCOPE = "ecosystem_outside_scope"
     MALFORMED_RECORD = "malformed_record"

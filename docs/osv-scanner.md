@@ -176,6 +176,13 @@ did not succeed). Per package:
   with reason `not_reported_by_scanner`. Lockfile contents are not parsed: with
   the real v2.3.0 binary, the `poetry.lock` and `uv.lock` extractors reported
   every entry, including names the requirements extractor skips.
+- Requirement lines whose declarations cannot be reconciled are limitations on
+  their manifest: includes (`-r` or `--requirement`, reason
+  `uninspected_include`; OSV-Scanner v2.3.0 follows `-r` but never reads
+  `--requirement=`), and declarations not attributable to a named package
+  (`-e`/`--editable`, local paths, bare URLs, reason
+  `unrecognized_declaration`), which the scanner skips. Constraint files (`-c`)
+  and other options declare no packages and are ignored.
 - A scanner package record with a blank name, ecosystem, or version is a
   malformed-record diagnostic. It never aborts normalization of the rest.
 

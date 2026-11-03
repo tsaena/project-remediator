@@ -254,6 +254,36 @@ def test_declarations_the_scanner_skipped_are_not_assessed(tmp_path: Path) -> No
         ]
 
 
+@pytest.mark.parametrize("include", ["-r base.in", "--requirement=base.in"])
+def test_requirement_includes_block_coverage(tmp_path: Path, include: str) -> None:
+    """Included declarations may be skipped (or, for --requirement, never read)."""
+    write(tmp_path, "requirements.txt", f"six==1.16.0\n{include}\n")
+    write(tmp_path, "base.in", "zope.interface==5.0\n")
+    result = normalized(scan_output("all-packages-clean.json", tmp_path), tmp_path)
+    assert result.status == ScanStatus.SUCCESS
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    found = manifest(result, "requirements.txt")
+    assert found.status == ManifestStatus.ASSESSED
+    assert [n.reason for n in found.notes] == [CoverageReason.UNINSPECTED_INCLUDE]
+    assert found.notes[0].detail is not None and include in found.notes[0].detail
+    assert found.packages[0].confidently_assessed
+
+
+@pytest.mark.parametrize(
+    "line", ["-e ./localpkg", "./localpkg", "https://example.invalid/x.whl"]
+)
+def test_unattributable_declarations_block_coverage(tmp_path: Path, line: str) -> None:
+    write(tmp_path, "requirements.txt", f"six==1.16.0\n{line}\n")
+    result = normalized(scan_output("all-packages-clean.json", tmp_path), tmp_path)
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    found = manifest(result, "requirements.txt")
+    assert [n.reason for n in found.notes] == [CoverageReason.UNRECOGNIZED_DECLARATION]
+    # No bogus package (such as "https") is invented from the line.
+    assert [p.name for p in found.packages] == ["six"]
+
+
 @pytest.mark.parametrize(
     "package",
     [

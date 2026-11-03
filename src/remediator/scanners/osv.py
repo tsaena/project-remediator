@@ -437,6 +437,26 @@ def _reported(
         _package(observation, path, found, succeeded) for observation in unique.values()
     ]
     if succeeded and found is not None and found.requirements is not None:
+        # Included files can hold declarations the scanner skips (or, for
+        # "--requirement", never reads), which nothing here can reconcile.
+        notes.extend(
+            CoverageNote(
+                reason=CoverageReason.UNINSPECTED_INCLUDE,
+                path=path,
+                detail=f"{include!r}: included declarations are not "
+                "independently inventoried",
+            )
+            for include in found.requirements.includes
+        )
+        notes.extend(
+            CoverageNote(
+                reason=CoverageReason.UNRECOGNIZED_DECLARATION,
+                path=path,
+                detail=f"{line[:200]!r}: not attributable to a named package, "
+                "so the scanner cannot assess it",
+            )
+            for line in found.requirements.unrecognized
+        )
         # The scanner silently skips some declarations (for example dotted or
         # one-character names), so every direct declaration must be accounted for.
         reported = {canonical_name(o.name) for o in source.packages}

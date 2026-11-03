@@ -87,6 +87,33 @@ def test_requirement_file_grammar() -> None:
 
 
 @pytest.mark.parametrize(
+    "line",
+    [
+        "-e ./localpkg",
+        "--editable git+https://example.invalid/x.git#egg=x",
+        "./localpkg",
+        "/abs/path/pkg",
+        "https://example.invalid/pkg-1.0-py3-none-any.whl",
+        "git+https://example.invalid/x.git",
+    ],
+)
+def test_unattributable_declarations_are_recorded(line: str) -> None:
+    """OSV-Scanner skips these; they must not vanish from coverage."""
+    parsed = parse_requirements(f"six==1.16.0\n{line}\n")
+    assert parsed.unrecognized == [line]
+    assert set(parsed.precision) == {"six"}
+
+
+def test_includes_are_recorded() -> None:
+    parsed = parse_requirements(
+        "-r base.txt\n--requirement=dev.txt\n-c constraints.txt\nsix==1.16.0\n"
+    )
+    # Constraint files only restrict versions; they declare no packages.
+    assert parsed.includes == ["-r base.txt", "--requirement=dev.txt"]
+    assert set(parsed.precision) == {"six"}
+
+
+@pytest.mark.parametrize(
     ("text", "has_entries"),
     [
         ("", False),

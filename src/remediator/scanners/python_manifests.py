@@ -47,6 +47,8 @@ CONTENT_CHECKED = frozenset({"setup.cfg", "pyproject.toml"})
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 _EXACT = re.compile(r"===?\s*([^\s;,*]+)\s*(?:;.*)?")
 _OPTION = re.compile(r"\s+--?[A-Za-z]")
+# What may follow a PEP 508 name: extras, a version specifier, markers, or "@".
+_AFTER_NAME = re.compile(r"$|[\s\[;=<>!~@]")
 _COMMENT = re.compile(r"(^|\s)#.*$")
 
 
@@ -61,10 +63,17 @@ class Requirements:
 
     precision: dict[str, VersionPrecision]
     has_entries: bool
+    # Raw "-r"/"--requirement" lines, whose declarations are not inventoried.
+    includes: list[str] = field(default_factory=list)
+    # Lines that declare something not attributable to a named package, such
+    # as editable installs, paths, and bare URLs; OSV-Scanner skips them.
+    unrecognized: list[str] = field(default_factory=list)
 
 
 def parse_requirements(text: str) -> Requirements:
     precision: dict[str, VersionPrecision] = {}
+    includes: list[str] = []
+    unrecognized: list[str] = []
     has_entries = False
     for line in text.replace("\\\n", " ").splitlines():
         line = _COMMENT.sub("", line).strip()
@@ -72,22 +81,30 @@ def parse_requirements(text: str) -> Requirements:
             continue
         if line.startswith(("-r", "--requirement")):
             has_entries = True
+            includes.append(line)
+            continue
+        if line.startswith(("-e", "--editable")):
+            has_entries = True
+            unrecognized.append(line)
             continue
         if line.startswith("-"):
+            # Other options (index URLs, hashes, constraints) declare nothing.
             continue
         line = _OPTION.split(line, maxsplit=1)[0]
-        match = _NAME.match(line)
-        if match is None:
-            continue
         has_entries = True
-        rest = re.sub(r"^\s*\[[^\]]*\]", "", line[match.end() :]).strip()
+        match = _NAME.match(line)
+        rest = line[match.end() :] if match else line
+        if match is None or not _AFTER_NAME.match(rest):
+            unrecognized.append(line)
+            continue
+        rest = re.sub(r"^\s*\[[^\]]*\]", "", rest).strip()
         exact = _EXACT.fullmatch(rest)
         found = VersionPrecision.EXACT if exact else VersionPrecision.IMPRECISE
         name = canonical_name(match.group())
         if precision.get(name, found) != found:
             found = VersionPrecision.UNKNOWN
         precision[name] = found
-    return Requirements(precision, has_entries)
+    return Requirements(precision, has_entries, includes, unrecognized)
 
 
 def is_supported(name: str) -> bool:
