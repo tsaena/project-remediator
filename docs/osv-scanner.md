@@ -234,7 +234,11 @@ SHA-256 digests of the archives before and after the scan. It is `reproducible`
 only if archives exist and are unchanged; a change during the scan is an error.
 OSV-Scanner does not report which archives it loaded, so all present archives
 are fingerprinted. The directory must be outside the target, because
-repository-controlled advisory data would undermine verification.
+repository-controlled advisory data would undermine verification. For the same
+reason, a symlink at any component below it (`osv-scanner/`, an ecosystem
+directory, or `all.zip`) is rejected before the scan, since it could point back
+into the target; archives are hashed through `O_NOFOLLOW` opens. A symlink that
+appears during the scan fails it and marks the source non-reproducible.
 `--local-db-path` is a hidden OSV-Scanner flag; if a later version drops it,
 the scan fails rather than silently going online.
 

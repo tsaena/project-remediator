@@ -588,6 +588,60 @@ def test_offline_database_inside_target_is_rejected(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("component", ["root", "ecosystem", "archive"])
+def test_symlinked_offline_database_is_rejected(tmp_path: Path, component: str) -> None:
+    """Advisory bytes must not be reachable from the target through symlinks."""
+    target = tmp_path / "repo"
+    write(target, "requirements.txt", "six==1.16.0\n")
+    planted = offline_database(target / "planted")  # repository-controlled
+    database = tmp_path / "db"
+    if component == "root":
+        database.mkdir()
+        (database / "osv-scanner").symlink_to(planted / "osv-scanner")
+    elif component == "ecosystem":
+        (database / "osv-scanner").mkdir(parents=True)
+        (database / "osv-scanner" / "PyPI").symlink_to(planted / "osv-scanner" / "PyPI")
+    else:
+        (database / "osv-scanner" / "PyPI").mkdir(parents=True)
+        (database / "osv-scanner" / "PyPI" / "all.zip").symlink_to(
+            planted / "osv-scanner" / "PyPI" / "all.zip"
+        )
+    marker = tmp_path / "scanner-ran"
+    executable = fake_scanner(
+        tmp_path, f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+    )
+    with pytest.raises(ValueError, match="symlink"):
+        OSVScanner(executable, offline_database=database).scan(
+            target, artifact_directory=tmp_path / "raw"
+        )
+    assert not marker.exists() and not (tmp_path / "raw").exists()
+
+
+def test_symlink_planted_during_scan_is_not_reproducible(tmp_path: Path) -> None:
+    target = tmp_path / "repo"
+    write(target, "requirements.txt", "six==1.16.0\n")
+    database = offline_database(tmp_path / "db")
+    archive = database / "osv-scanner" / "PyPI" / "all.zip"
+    output = (FIXTURES / "all-packages-clean.json").read_text()
+    executable = fake_scanner(
+        tmp_path,
+        f"""
+import os, sys
+os.replace({str(archive)!r}, {str(target / "copy.zip")!r})
+os.symlink({str(target / "copy.zip")!r}, {str(archive)!r})
+sys.stdout.write({output!r}.replace('"/repo/', '"' + sys.argv[-1] + '/'))
+""",
+    )
+    result = OSVScanner(executable, offline_database=database).scan(
+        target, artifact_directory=tmp_path / "raw"
+    )
+    assert result.status == ScanStatus.FAILED
+    assert "became unsafe" in result.errors[0]
+    assert result.provenance is not None
+    source = result.provenance.advisory_source
+    assert source is not None and not source.reproducible and not source.fingerprints
+
+
 def test_inventory_limits_reach_coverage(tmp_path: Path) -> None:
     target = tmp_path / "repo"
     write(target, "requirements.txt", "six==1.16.0\n")

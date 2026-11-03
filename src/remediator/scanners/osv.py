@@ -7,6 +7,7 @@ import os
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -718,16 +719,60 @@ def _sha256(path: Path) -> str:
 
 
 def _database_fingerprints(database: Path) -> list[Fingerprint]:
-    """Fingerprint OSV-Scanner's offline archives: <dir>/osv-scanner/*/all.zip."""
-    return [
-        Fingerprint(
-            subject=archive.relative_to(database).as_posix(),
-            algorithm="sha256",
-            value=_sha256(archive),
-        )
-        for archive in sorted((database / "osv-scanner").glob("*/all.zip"))
-        if archive.is_file()
-    ]
+    """Fingerprint OSV-Scanner's offline archives: <dir>/osv-scanner/*/all.zip.
+
+    Symlinks below the database root are rejected: the scanner would follow
+    them, and one could point at repository-controlled bytes. Every component
+    is opened relative to its parent with ``O_NOFOLLOW``, so the check and the
+    bytes hashed cannot diverge.
+    """
+
+    def child(parent: int, name: str, *, directory: bool) -> int | None:
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError(f"offline database contains a symlink: {name}")
+        expected = stat.S_ISDIR if directory else stat.S_ISREG
+        if not expected(info.st_mode):
+            return None
+        flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else 0)
+        return os.open(name, flags, dir_fd=parent)
+
+    fingerprints: list[Fingerprint] = []
+    root = os.open(database, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        base = child(root, "osv-scanner", directory=True)
+        if base is None:
+            return []
+        try:
+            for ecosystem in sorted(os.listdir(base)):
+                folder = child(base, ecosystem, directory=True)
+                if folder is None:
+                    continue
+                try:
+                    archive = child(folder, "all.zip", directory=False)
+                    if archive is None:
+                        continue
+                    digest = hashlib.sha256()
+                    with os.fdopen(archive, "rb") as handle:
+                        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                finally:
+                    os.close(folder)
+                fingerprints.append(
+                    Fingerprint(
+                        subject=f"osv-scanner/{ecosystem}/all.zip",
+                        algorithm="sha256",
+                        value=digest.hexdigest(),
+                    )
+                )
+        finally:
+            os.close(base)
+    finally:
+        os.close(root)
+    return fingerprints
 
 
 class OSVScanner:
@@ -777,6 +822,8 @@ class OSVScanner:
         database = self.offline_database
         if database is not None and (database == target or target in database.parents):
             raise ValueError("offline database must be outside the scanned target")
+        # Raises on symlinked archives before anything is created or executed.
+        before = _database_fingerprints(database) if database else []
         # Validate every path component before resolving, including parent symlinks.
         artifact_directory = Path(os.path.abspath(artifact_directory))
         resolved_artifacts = artifact_directory.resolve()
@@ -796,7 +843,6 @@ class OSVScanner:
         database_flags = (
             ["--offline", f"--local-db-path={database}"] if database else []
         )
-        before = _database_fingerprints(database) if database else []
         # --config is a global override in v2.3.0, not a default/fallback config.
         with TemporaryDirectory(prefix="remediator-osv-") as controlled:
             config = Path(controlled) / "osv-scanner.toml"
@@ -878,7 +924,14 @@ class OSVScanner:
                 detail="no local database was selected, so OSV-Scanner v2 queried "
                 "the online OSV service; results are time-bound, not a snapshot",
             )
-        after = _database_fingerprints(self.offline_database)
+        try:
+            after = _database_fingerprints(self.offline_database)
+        except ValueError as exc:
+            errors.append(f"offline advisory database became unsafe: {exc}")
+            return AdvisorySource(
+                kind=AdvisorySourceKind.LOCAL_DATABASE,
+                detail="database archives became unsafe during the scan",
+            )
         if before != after:
             errors.append("offline advisory database changed during the scan")
             return AdvisorySource(
