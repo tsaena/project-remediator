@@ -235,8 +235,9 @@ live OSV API, which is time-bound and **never reproducible**. With
 SHA-256 digests of the archives before and after the scan. It is `reproducible`
 only if archives exist and are unchanged; a change during the scan is an error.
 OSV-Scanner does not report which archives it loaded, so all present archives
-are fingerprinted. The directory must be outside the target, because
-repository-controlled advisory data would undermine verification. For the same
+are fingerprinted. The database and the target must not contain each other in
+either direction, because repository-controlled advisory data would undermine
+verification. For the same
 reason, a symlink at any component below it (`osv-scanner/`, an ecosystem
 directory, or `all.zip`) is rejected before the scan, since it could point back
 into the target; archives are hashed through `O_NOFOLLOW` opens. A symlink that

@@ -848,8 +848,16 @@ class OSVScanner:
         if os.name != "posix":
             raise ValueError("scanner process-group cleanup requires POSIX")
         database = self.offline_database
-        if database is not None and (database == target or target in database.parents):
-            raise ValueError("offline database must be outside the scanned target")
+        # Reject overlap in both directions: a database containing the target
+        # could load archives that the repository itself provides.
+        if database is not None and (
+            database == target
+            or target in database.parents
+            or database in target.parents
+        ):
+            raise ValueError(
+                "offline database and scanned target must not contain each other"
+            )
         # Raises on symlinked archives before anything is created or executed.
         before = _database_fingerprints(database) if database else []
         # Validate every path component before resolving, including parent symlinks.

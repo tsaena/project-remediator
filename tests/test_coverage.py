@@ -641,13 +641,31 @@ def test_empty_offline_database_is_not_reproducible(tmp_path: Path) -> None:
     assert source is not None and not source.reproducible and not source.fingerprints
 
 
-def test_offline_database_inside_target_is_rejected(tmp_path: Path) -> None:
-    target = tmp_path / "repo"
-    database = offline_database(target / "db")
-    with pytest.raises(ValueError, match="outside the scanned target"):
-        OSVScanner(offline_database=database).scan(
+@pytest.mark.parametrize("layout", ["database-in-target", "target-in-database", "same"])
+def test_overlapping_database_and_target_are_rejected(
+    tmp_path: Path, layout: str
+) -> None:
+    """Either containment lets the repository supply advisory archives."""
+    if layout == "database-in-target":
+        target = tmp_path / "repo"
+        database = offline_database(target / "db")
+    elif layout == "target-in-database":
+        # No symlinks: all.zip sits directly inside the scanned target.
+        database = offline_database(tmp_path / "db")
+        target = database / "osv-scanner" / "PyPI"
+    else:
+        database = offline_database(tmp_path / "db")
+        target = database
+    write(target, "requirements.txt", "six==1.16.0\n")
+    marker = tmp_path / "scanner-ran"
+    executable = fake_scanner(
+        tmp_path, f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+    )
+    with pytest.raises(ValueError, match="must not contain each other"):
+        OSVScanner(executable, offline_database=database).scan(
             target, artifact_directory=tmp_path / "raw"
         )
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("component", ["root", "ecosystem", "archive"])
