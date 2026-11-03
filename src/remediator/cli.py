@@ -18,12 +18,23 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=120)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--max-output-bytes", type=int, default=10 * 1024 * 1024)
+    parser.add_argument(
+        "--asset-key",
+        help="stable caller-chosen asset identity; checkout paths are not identity",
+    )
+    parser.add_argument(
+        "--offline-database",
+        type=Path,
+        help="directory holding OSV offline archives (osv-scanner/<ecosystem>/"
+        "all.zip); used read-only and fingerprinted",
+    )
     args = parser.parse_args()
     try:
         scanner = OSVScanner(
             args.executable,
             timeout=args.timeout,
             max_output_bytes=args.max_output_bytes,
+            offline_database=args.offline_database,
         )
         target = args.target.resolve(strict=True)
         with ExitStack() as stack:
@@ -37,7 +48,11 @@ def main() -> int:
                 if resolved == artifacts or artifacts in resolved.parents:
                     raise ValueError("output must be outside the artifact directory")
                 output = stack.enter_context(private_output(args.output))
-            result = scanner.scan(target, artifact_directory=args.artifacts)
+            result = scanner.scan(
+                target,
+                artifact_directory=args.artifacts,
+                asset_key=args.asset_key,
+            )
             rendered = result.model_dump_json(indent=2) + "\n"
             if output is not None:
                 output.write(rendered.encode())

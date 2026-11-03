@@ -1,0 +1,208 @@
+{
+  "schema_version": 2,
+  "execution_id": "synthetic-coverage",
+  "asset": {
+    "type": "repository",
+    "locator": "/srv/checkouts/demo",
+    "key": "example.invalid/synthetic/demo"
+  },
+  "scanner": {
+    "name": "OSV-Scanner",
+    "version": "2.3.0"
+  },
+  "status": "success",
+  "findings": [
+    {
+      "asset": {
+        "type": "repository",
+        "locator": "/srv/checkouts/demo",
+        "key": "example.invalid/synthetic/demo"
+      },
+      "component": {
+        "name": "synthetic-package",
+        "ecosystem": "PyPI",
+        "installed_version": "1.0",
+        "location": "/srv/checkouts/demo/requirements.txt"
+      },
+      "vulnerability": {
+        "primary_id": "SYNTHETIC-2026-0002",
+        "aliases": [
+          "SYNTHETIC-ALIAS-002"
+        ],
+        "title": "Synthetic advisory for documentation",
+        "description": null,
+        "severity": null,
+        "references": [
+          "https://example.invalid/advisory/SYNTHETIC-2026-0002"
+        ]
+      },
+      "evidence": {
+        "scanner": {
+          "name": "OSV-Scanner",
+          "version": "2.3.0"
+        },
+        "observed_at": "2026-11-03T12:00:04Z",
+        "target": "/srv/checkouts/demo/requirements.txt",
+        "artifact_reference": "file:///srv/artifacts/synthetic-coverage"
+      },
+      "fix": {
+        "status": "unknown",
+        "fixed_versions": []
+      }
+    }
+  ],
+  "errors": [],
+  "coverage": {
+    "status": "incomplete",
+    "inventory": {
+      "ecosystems": [
+        "PyPI"
+      ],
+      "supported_patterns": [
+        "*requirements*.txt (case-sensitive, as OSV-Scanner matches)",
+        "Pipfile.lock",
+        "pdm.lock",
+        "poetry.lock",
+        "uv.lock"
+      ],
+      "unsupported_patterns": [
+        "setup.py",
+        "setup.cfg (with install_requires or extras_require)",
+        "pyproject.toml (with dependency declarations)",
+        "Pipfile",
+        "pylock.toml and pylock.*.toml",
+        "*requirements*.in",
+        "case variants of *requirements*.txt",
+        "*.txt inside a directory named requirements"
+      ],
+      "skipped_directories": [
+        ".git"
+      ],
+      "max_depth": 32,
+      "max_entries": 100000,
+      "entries_examined": 2,
+      "truncated": false
+    },
+    "manifests": [
+      {
+        "path": "requirements.txt",
+        "status": "assessed",
+        "discovered_by": [
+          "inventory",
+          "scanner"
+        ],
+        "packages": [
+          {
+            "name": "six",
+            "ecosystem": "PyPI",
+            "version": "1.16.0",
+            "assessment": "assessed",
+            "version_precision": "exact",
+            "advisory_count": 0,
+            "notes": []
+          },
+          {
+            "name": "synthetic-package",
+            "ecosystem": "PyPI",
+            "version": "1.0",
+            "assessment": "assessed",
+            "version_precision": "imprecise",
+            "advisory_count": 1,
+            "notes": [
+              {
+                "reason": "imprecise_constraint",
+                "path": null,
+                "detail": "version 1.0 was derived from a non-exact constraint, not an exact pin"
+              }
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "path": "setup.py",
+        "status": "unsupported",
+        "discovered_by": [
+          "inventory"
+        ],
+        "packages": [],
+        "notes": [
+          {
+            "reason": "unsupported_format",
+            "path": "setup.py",
+            "detail": "setup.py is not extracted and cannot be inspected without executing"
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      {
+        "reason": "imprecise_constraint",
+        "path": "requirements.txt",
+        "detail": "package synthetic-package: version 1.0 was derived from a non-exact constraint, not an exact pin"
+      },
+      {
+        "reason": "unsupported_format",
+        "path": "setup.py",
+        "detail": "setup.py is not extracted and cannot be inspected without executing"
+      }
+    ]
+  },
+  "provenance": {
+    "started_at": "2026-11-03T12:00:00Z",
+    "finished_at": "2026-11-03T12:00:04Z",
+    "exit_code": 1,
+    "command": [
+      "/opt/osv-scanner/osv-scanner",
+      "scan",
+      "source",
+      "--format=json",
+      "--no-resolve",
+      "--recursive",
+      "--all-packages",
+      "--offline",
+      "--local-db-path=/srv/osv-db",
+      "--config",
+      "/tmp/remediator-osv-example/osv-scanner.toml",
+      "/srv/checkouts/demo"
+    ],
+    "advisory_source": {
+      "kind": "local_database",
+      "origin": "adapter",
+      "reproducible": true,
+      "fingerprints": [
+        {
+          "subject": "osv-scanner/PyPI/all.zip",
+          "algorithm": "sha256",
+          "value": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "detail": "adapter-computed digests of the archives present before and after the scan; which archives the scanner loaded is not reported"
+    },
+    "artifacts": [
+      "file:///srv/artifacts/synthetic-coverage/stdout.json",
+      "file:///srv/artifacts/synthetic-coverage/stderr.txt",
+      "file:///srv/artifacts/synthetic-coverage/version.txt"
+    ],
+    "facts": [
+      {
+        "name": "scanner_version",
+        "origin": "scanner",
+        "value": "2.3.0",
+        "detail": null
+      },
+      {
+        "name": "scanner_commit",
+        "origin": "scanner",
+        "value": null,
+        "detail": "not present in --version output"
+      },
+      {
+        "name": "configuration_sha256",
+        "origin": "adapter",
+        "value": "8237c9e33852a5c109c2f9eea3f540a7a09b46e3b48674b5dad34872d1f4ea48",
+        "detail": null
+      }
+    ]
+  }
+}

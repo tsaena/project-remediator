@@ -223,6 +223,10 @@ Merged into `main`:
 - **OSV-Scanner v2 integration** — controlled local source scans, conservative
   JSON normalization, retained raw artifacts, and a developer CLI
   ([OSV-Scanner guide](osv-scanner.md); [issue #6](https://github.com/tsaena/project-remediator/issues/6), [PR #7](https://github.com/tsaena/project-remediator/pull/7)).
+- **Scan coverage and provenance** — every report records which manifests and
+  packages were actually assessed, with explicit reasons for anything that was
+  not, plus scanner version, command, execution window, and advisory source
+  ([coverage evidence](osv-scanner.md#coverage-evidence); [issue #9](https://github.com/tsaena/project-remediator/issues/9)).
 
 No pull requests are currently under review.
 
@@ -230,11 +234,15 @@ Known gaps that affect the later stages:
 
 - Fix information is always `unknown`. Fixed versions are not yet derived from
   advisory data.
-- Scanner version is not recorded in scan results.
+- Coverage evidence covers Python manifests only. Packages from other
+  ecosystems are reported but not vouched for.
+- By default, scans query the live OSV API, which is not a reproducible
+  advisory basis. A fingerprinted offline database is optional.
 - Related advisory IDs for the same underlying vulnerability (for example
   PYSEC and GHSA records that share a CVE) are reported as separate findings.
 - Findings have no identity that can be correlated across scan executions.
-- Scans honor the repository's `.gitignore`, do not resolve transitive
-  dependencies, and run without OS-level isolation.
+- Scans honor the repository's `.gitignore` (exclusions are reported, not
+  hidden), do not resolve transitive dependencies, and run without OS-level
+  isolation.
 
 The [roadmap](roadmap.md) describes how these gaps are addressed.

@@ -9,14 +9,22 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from remediator.domain import (
+    AdvisorySource,
     Asset,
     AssetType,
     Component,
+    CoverageReason,
+    CoverageStatus,
     Evidence,
     Finding,
     FixInformation,
     FixStatus,
+    ManifestCoverage,
+    PackageCoverage,
+    ProvenanceFact,
+    ScanCoverage,
     Scanner,
+    ScanProvenance,
     ScanResult,
     ScanStatus,
     Vulnerability,
@@ -313,3 +321,208 @@ def test_missing_evidence_fields(scan_payload: dict[str, Any], field: str) -> No
     del scan_payload["findings"][0]["evidence"][field]
     with pytest.raises(ValidationError):
         ScanResult.model_validate(scan_payload)
+
+
+def coverage_payload() -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads(
+        (FIXTURES / "repository_coverage_scan.json").read_text()
+    )
+    return payload
+
+
+def no_gaps_coverage() -> dict[str, Any]:
+    return {
+        "status": "no_known_gaps",
+        "inventory": {
+            "ecosystems": ["PyPI"],
+            "supported_patterns": ["requirements.txt"],
+            "max_depth": 1,
+            "max_entries": 10,
+            "entries_examined": 1,
+            "truncated": False,
+        },
+        "manifests": [
+            {
+                "path": "requirements.txt",
+                "status": "assessed",
+                "discovered_by": ["inventory", "scanner"],
+                "packages": [
+                    {
+                        "name": "six",
+                        "ecosystem": "PyPI",
+                        "version": "1.16.0",
+                        "assessment": "assessed",
+                        "version_precision": "exact",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_version_one_reports_still_load(scan_payload: dict[str, Any]) -> None:
+    assert "schema_version" not in scan_payload
+    scan = ScanResult.model_validate(scan_payload)
+    assert scan.schema_version == 1
+    assert scan.coverage is None and scan.provenance is None
+    assert scan.asset.key is None
+
+
+def test_version_one_cannot_carry_new_evidence(scan_payload: dict[str, Any]) -> None:
+    scan_payload["coverage"] = no_gaps_coverage()
+    with pytest.raises(ValidationError, match="schema 2"):
+        ScanResult.model_validate(scan_payload)
+    scan_payload["schema_version"] = 2
+    assert ScanResult.model_validate(scan_payload).coverage is not None
+
+
+def test_coverage_example_round_trip() -> None:
+    scan = ScanResult.model_validate(coverage_payload())
+    assert scan.schema_version == 2
+    assert scan.asset.key == "example.invalid/synthetic/demo"
+    assert scan.coverage is not None and scan.provenance is not None
+    assert scan.coverage.status == CoverageStatus.INCOMPLETE
+    assert {n.reason for n in scan.coverage.limitations} == {
+        CoverageReason.IMPRECISE_CONSTRAINT,
+        CoverageReason.UNSUPPORTED_FORMAT,
+    }
+    assert ScanResult.model_validate_json(scan.model_dump_json()) == scan
+
+
+def test_new_reports_are_rejected_by_version_one_models() -> None:
+    # Documented incompatibility: older code forbids the new fields.
+    class VersionOne(BaseModel):
+        model_config = ScanResult.model_config
+
+        execution_id: str
+
+    with pytest.raises(ValidationError):
+        VersionOne.model_validate({"execution_id": "x", "schema_version": 2})
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda c: c["manifests"][0]["packages"][0].update(
+                version_precision="imprecise",
+                notes=[{"reason": "imprecise_constraint"}],
+            ),
+            "unassessed packages",
+        ),
+        (lambda c: c["inventory"].update(truncated=True), "full inventory"),
+        (lambda c: c.update(inventory=None), "full inventory"),
+        (lambda c: c.update(manifests=[]), "requires a manifest"),
+        (
+            lambda c: c.update(limitations=[{"reason": "possibly_ignored"}]),
+            "cannot have limitations",
+        ),
+        (
+            lambda c: c["manifests"][0].update(
+                notes=[{"reason": "no_dependency_entries"}]
+            ),
+            "unassessed manifests",
+        ),
+    ],
+)
+def test_no_known_gaps_is_self_consistent(mutate: Any, message: str) -> None:
+    coverage = no_gaps_coverage()
+    ScanCoverage.model_validate(coverage)
+    mutate(coverage)
+    with pytest.raises(ValidationError, match=message):
+        ScanCoverage.model_validate(coverage)
+
+
+@pytest.mark.parametrize("status", ["incomplete", "unknown"])
+def test_gaps_require_reasons(status: str) -> None:
+    coverage = no_gaps_coverage() | {"status": status}
+    with pytest.raises(ValidationError, match="requires limitations"):
+        ScanCoverage.model_validate(coverage)
+
+
+@pytest.mark.parametrize("status", ["partial", "failed"])
+def test_unsuccessful_scans_cannot_claim_coverage(status: str) -> None:
+    payload = coverage_payload()
+    payload.update(
+        status=status, errors=["synthetic failure"], coverage=no_gaps_coverage()
+    )
+    if status == "failed":
+        payload["findings"] = []
+    with pytest.raises(ValidationError, match="cannot claim coverage"):
+        ScanResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("package", "message"),
+    [
+        (
+            {
+                "name": "x",
+                "ecosystem": "PyPI",
+                "assessment": "assessed",
+                "version_precision": "exact",
+            },
+            "ecosystem and version",
+        ),
+        (
+            {"name": "x", "assessment": "not_assessed"},
+            "require a note",
+        ),
+        (
+            {
+                "name": "x",
+                "ecosystem": "PyPI",
+                "version": "1",
+                "assessment": "assessed",
+                "version_precision": "exact",
+                "advisory_count": -1,
+            },
+            "greater than or equal",
+        ),
+    ],
+)
+def test_package_coverage_invariants(package: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        PackageCoverage.model_validate(package)
+
+
+def test_unassessed_manifests_cannot_list_packages() -> None:
+    package = no_gaps_coverage()["manifests"][0]["packages"][0]
+    with pytest.raises(ValidationError, match="list packages"):
+        ManifestCoverage.model_validate(
+            {
+                "path": "requirements.txt",
+                "status": "not_reported",
+                "discovered_by": ["inventory"],
+                "packages": [package],
+                "notes": [{"reason": "possibly_ignored"}],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ({"kind": "online_service", "reproducible": True}, "reproducible"),
+        ({"kind": "local_database", "reproducible": True}, "reproducible"),
+    ],
+)
+def test_only_fingerprinted_databases_are_reproducible(
+    source: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        AdvisorySource.model_validate(source)
+
+
+def test_provenance_invariants() -> None:
+    with pytest.raises(ValidationError, match="requires a detail"):
+        ProvenanceFact.model_validate({"name": "scanner_version", "origin": "scanner"})
+    with pytest.raises(ValidationError, match="finish before it starts"):
+        ScanProvenance.model_validate(
+            {
+                "started_at": "2026-11-03T12:00:01Z",
+                "finished_at": "2026-11-03T12:00:00Z",
+            }
+        )
+    with pytest.raises(ValidationError):
+        ScanProvenance.model_validate({"started_at": "2026-11-03T12:00:00"})
