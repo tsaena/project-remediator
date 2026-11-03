@@ -152,9 +152,88 @@ def test_inventory_never_follows_symlinks(tmp_path: Path) -> None:
     # The link target is never read, so nothing about it is claimed.
     assert manifest.requirements is None and manifest.has_entries is None
     assert "linked/requirements.txt" not in result.manifests
-    assert [(n.reason, n.path) for n in result.limitations] == [
-        (CoverageReason.SYMLINK_NOT_FOLLOWED, "linked")
+    # Target types are never inspected, so a dangling link and a directory link
+    # are treated alike: either could hide manifests.
+    assert sorted((n.reason, n.path) for n in result.limitations) == [
+        (CoverageReason.SYMLINK_NOT_FOLLOWED, "dangling.txt"),
+        (CoverageReason.SYMLINK_NOT_FOLLOWED, "linked"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "supported"),
+    [
+        ("requirements.txt", True),
+        ("Pipfile", False),
+        ("pylock.toml", False),
+        ("requirements.in", False),
+        ("Requirements.txt", False),
+        ("setup.py", False),
+        ("setup.cfg", False),
+        ("pyproject.toml", False),
+        ("requirements/base.txt", False),
+    ],
+)
+def test_symlinked_manifests_are_recorded_by_name(
+    tmp_path: Path, name: str, supported: bool
+) -> None:
+    """Supported or not, a symlinked manifest never vanishes from the inventory."""
+    root = tmp_path / "repo"
+    link = root / name
+    link.parent.mkdir(parents=True)
+    write(tmp_path, "outside.txt", "Django==2.2.0\n")
+    link.symlink_to(tmp_path / "outside.txt")
+    found = inventory(root).manifests[name]
+    assert found.supported is supported
+    assert [n.reason for n in found.notes] == [CoverageReason.SYMLINK_NOT_FOLLOWED]
+    assert found.requirements is None and found.has_entries is None
+
+
+def test_unclassified_symlinks_are_capped_but_counted(tmp_path: Path) -> None:
+    from remediator.scanners.python_manifests import MAX_SYMLINK_NOTES
+
+    target = write(tmp_path, "outside", "")
+    root = tmp_path / "repo"
+    root.mkdir()
+    for index in range(MAX_SYMLINK_NOTES + 5):
+        (root / f"link{index}").symlink_to(target)
+    notes = inventory(root).limitations
+    assert len(notes) == MAX_SYMLINK_NOTES + 1
+    assert all(n.reason == CoverageReason.SYMLINK_NOT_FOLLOWED for n in notes)
+    assert notes[-1].path is None and notes[-1].detail
+    assert notes[-1].detail.startswith("5 more symlinks")
+
+
+def test_entry_budget_bounds_directory_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A huge directory must not be read beyond the remaining entry budget."""
+    for index in range(500):
+        write(tmp_path, f"f{index}")
+    read = 0
+    real_scandir = os.scandir
+
+    class Counting:
+        def __init__(self, fd: int) -> None:
+            self.scan = real_scandir(fd)
+
+        def __enter__(self) -> "Counting":
+            self.scan.__enter__()
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.scan.__exit__(*args)
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            nonlocal read
+            for entry in self.scan:
+                read += 1
+                yield entry
+
+    monkeypatch.setattr(os, "scandir", Counting)
+    result = inventory(tmp_path, max_entries=3)
+    assert result.record.truncated and result.record.entries_examined == 3
+    assert read <= 4
 
 
 def test_inventory_bounds(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ import re
 import stat
 import tomllib
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
 
 from remediator.domain import (
@@ -38,6 +39,10 @@ SKIPPED_DIRECTORIES = [".git"]
 MAX_DEPTH = 32
 MAX_ENTRIES = 100_000
 MAX_INSPECTED_BYTES = 1024 * 1024
+# Individually reported unclassified symlinks; the rest are summarized.
+MAX_SYMLINK_NOTES = 100
+# Read by content to decide whether they declare dependencies.
+CONTENT_CHECKED = frozenset({"setup.cfg", "pyproject.toml"})
 
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 _EXACT = re.compile(r"===?\s*([^\s;,*]+)\s*(?:;.*)?")
@@ -89,8 +94,8 @@ def is_supported(name: str) -> bool:
     return name in LOCKFILES or (name.endswith(".txt") and "requirements" in name)
 
 
-def _unsupported(name: str, parent: str, read: "_Reader") -> str | None:
-    """Return why a known Python manifest is not assessed, if it declares deps."""
+def _unsupported_name(name: str, parent: str) -> str | None:
+    """Why a file is an unsupported manifest, judged by its name alone."""
     lower = name.lower()
     if name == "setup.py":
         return "setup.py is not extracted and cannot be inspected without executing"
@@ -106,6 +111,14 @@ def _unsupported(name: str, parent: str, read: "_Reader") -> str | None:
         return "OSV-Scanner matches *requirements*.txt case-sensitively"
     if lower.endswith(".txt") and Path(parent).name.lower() == "requirements":
         return "file name lacks 'requirements', so OSV-Scanner does not extract it"
+    return None
+
+
+def _unsupported(name: str, parent: str, read: "_Reader") -> str | None:
+    """Return why a known Python manifest is not assessed, if it declares deps."""
+    why = _unsupported_name(name, parent)
+    if why is not None:
+        return why
     if name == "setup.cfg":
         text = read()
         if text is None:
@@ -195,6 +208,7 @@ def inventory(
     manifests: dict[str, DiscoveredManifest] = {}
     limitations: list[CoverageNote] = []
     examined = 0
+    symlinks = 0
     truncated = False
     # Each entry: (descriptor path relative to root, depth, ignore files in scope).
     pending: list[tuple[str, int, list[str]]] = [("", 0, [])]
@@ -214,8 +228,11 @@ def inventory(
                 )
                 continue
             try:
+                # Never read more than the remaining budget (plus one, to
+                # detect truncation) from a directory, however large it is.
+                budget = max_entries - examined
                 with os.scandir(fd) as scan:
-                    entries = sorted(scan, key=lambda e: e.name)
+                    entries = sorted(islice(scan, budget + 1), key=lambda e: e.name)
                 names = {e.name for e in entries}
                 if ".gitignore" in names:
                     ignores = [*ignores, _join(relative, ".gitignore")]
@@ -234,7 +251,9 @@ def inventory(
                     examined += 1
                     path = _join(relative, entry.name)
                     if entry.is_symlink():
-                        _symlink(entry, path, manifests, limitations)
+                        symlinks += _symlink(
+                            entry.name, relative, path, manifests, limitations, symlinks
+                        )
                     elif entry.is_dir(follow_symlinks=False):
                         if entry.name in SKIPPED_DIRECTORIES:
                             continue
@@ -260,6 +279,14 @@ def inventory(
                 os.close(fd)
     finally:
         os.close(root_fd)
+    if symlinks > MAX_SYMLINK_NOTES:
+        limitations.append(
+            CoverageNote(
+                reason=CoverageReason.SYMLINK_NOT_FOLLOWED,
+                detail=f"{symlinks - MAX_SYMLINK_NOTES} more symlinks were not "
+                "followed and are not listed individually",
+            )
+        )
     record = ManifestInventory(
         ecosystems=["PyPI"],
         supported_patterns=SUPPORTED_PATTERNS,
@@ -292,27 +319,36 @@ def _open_directory(root_fd: int, relative: str) -> int:
 
 
 def _symlink(
-    entry: os.DirEntry[str],
+    name: str,
+    parent: str,
     path: str,
     manifests: dict[str, DiscoveredManifest],
     limitations: list[CoverageNote],
-) -> None:
+    unclassified: int,
+) -> int:
+    """Classify a symlink by its own name; its target is never examined.
+
+    Returns 1 for a symlink that is not a manifest name. Its target might be a
+    directory of manifests, so it is always a limitation, never ignored.
+    """
     note = CoverageNote(
         reason=CoverageReason.SYMLINK_NOT_FOLLOWED,
         path=path,
         detail="symlinks are not followed by the inventory or OSV-Scanner",
     )
-    name = entry.name
-    if is_supported(name) or name in {"setup.py", "setup.cfg", "pyproject.toml"}:
-        manifests[path] = DiscoveredManifest(path, is_supported(name), [note])
-        return
-    try:
-        # Only the link's type is checked; its target is never traversed.
-        points_to_directory = entry.is_dir(follow_symlinks=True)
-    except OSError:
-        points_to_directory = False
-    if points_to_directory:
-        limitations.append(note)
+    supported = is_supported(name)
+    if supported or name in CONTENT_CHECKED or _unsupported_name(name, parent):
+        manifests[path] = DiscoveredManifest(path, supported, [note])
+        return 0
+    if unclassified < MAX_SYMLINK_NOTES:
+        limitations.append(
+            CoverageNote(
+                reason=CoverageReason.SYMLINK_NOT_FOLLOWED,
+                path=path,
+                detail="symlink not followed; its target may contain manifests",
+            )
+        )
+    return 1
 
 
 def _file(

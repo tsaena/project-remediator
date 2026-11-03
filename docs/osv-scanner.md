@@ -131,11 +131,21 @@ or builds anything, including `setup.py`.
 |---|---|
 | `*requirements*.txt` (case-sensitive, as OSV matches), `Pipfile.lock`, `pdm.lock`, `poetry.lock`, `uv.lock` | Supported: must be reported by the scanner |
 | `setup.py`; `setup.cfg` and `pyproject.toml` that declare dependencies; `Pipfile`; `pylock*.toml`; `*requirements*.in`; case variants such as `Requirements.txt`; `*.txt` inside a `requirements/` directory | Unsupported: declared dependencies are not assessed |
-| Symlinked manifests and symlinked directories | Excluded: not followed by the inventory or OSV-Scanner |
+| Any symlink whose own name matches a supported or unsupported pattern | Excluded manifest: never followed by the inventory or OSV-Scanner |
+| Every other symlink | Limitation: its target is never examined, not even to learn whether it is a directory that could hide manifests |
 
 These patterns mirror the osv-scalibr v0.4.0 extractors enabled by OSV-Scanner
 v2.3.0 source scans (`requirements`, `pipfilelock`, `pdmlock`, `poetrylock`,
 `uvlock`). Other ecosystems are not inventoried.
+
+Symlinks are classified by their own names only; the inventory never calls
+`stat` on a link target. As a result, any symlink under the target keeps
+coverage `incomplete`, including those inside an in-tree virtual environment
+(`.venv/bin/python`). Keep virtual environments outside the scanned directory
+when coverage evidence matters. The first 100 unclassified symlinks are listed
+individually and the rest are counted in one summary note. The directory-entry
+limit is enforced while reading each directory, so an oversized directory is
+never read beyond the remaining budget.
 
 Per manifest, `status` is `assessed` (the scanner reported package records),
 `not_reported`, `excluded`, `unsupported`, or `unknown` (reported by a scan that

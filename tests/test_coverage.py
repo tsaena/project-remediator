@@ -186,6 +186,21 @@ def test_mixed_precision_and_nested_manifests(tmp_path: Path) -> None:
             ManifestStatus.EXCLUDED,
             CoverageReason.SYMLINK_NOT_FOLLOWED,
         ),
+        (
+            # Unsupported manifest names must not vanish when symlinked.
+            lambda root: (root / "Pipfile").symlink_to(root / "requirements.txt"),
+            "Pipfile",
+            ManifestStatus.EXCLUDED,
+            CoverageReason.SYMLINK_NOT_FOLLOWED,
+        ),
+        (
+            lambda root: (root / "requirements.in").symlink_to(
+                root / "requirements.txt"
+            ),
+            "requirements.in",
+            ManifestStatus.EXCLUDED,
+            CoverageReason.SYMLINK_NOT_FOLLOWED,
+        ),
     ],
 )
 def test_unassessed_manifests_block_coverage_claims(
@@ -207,6 +222,19 @@ def test_unassessed_manifests_block_coverage_claims(
     assert [n.reason for n in found.notes] == [reason]
     assert reason in reasons(result)
     assert manifest(result, "requirements.txt").packages[0].confidently_assessed
+
+
+def test_any_other_symlink_blocks_coverage(tmp_path: Path) -> None:
+    """A link's target type is never inspected, so even a file link is a gap."""
+    write(tmp_path, "requirements.txt", "six==1.16.0\n")
+    write(tmp_path.parent / "elsewhere", "notes.md")
+    (tmp_path / "docs").symlink_to(tmp_path.parent / "elsewhere")
+    result = normalized(scan_output("all-packages-clean.json", tmp_path), tmp_path)
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    assert [(n.reason, n.path) for n in result.coverage.limitations] == [
+        (CoverageReason.SYMLINK_NOT_FOLLOWED, "docs")
+    ]
 
 
 def test_lockfile_versions_are_exact(tmp_path: Path) -> None:
