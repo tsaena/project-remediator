@@ -180,18 +180,33 @@ def _declares_dependencies(data: dict[str, object]) -> bool:
             return True
     if data.get("dependency-groups"):
         return True
-    pending: list[object] = [data.get("tool")]
+    # Each entry: (path of keys below [tool], value).
+    pending: list[tuple[tuple[str, ...], object]] = [((), data.get("tool"))]
     while pending:
-        value = pending.pop()
+        path, value = pending.pop()
         if isinstance(value, dict):
             for key, child in value.items():
-                python_only = isinstance(child, dict) and set(child) <= {"python"}
-                if "depend" in str(key).lower() and child and not python_only:
+                where = (*path, str(key))
+                if (
+                    "depend" in str(key).lower()
+                    and child
+                    and not _poetry_python_constraint(where, child)
+                ):
                     return True
-                pending.append(child)
+                pending.append((where, child))
         elif isinstance(value, list):
-            pending.extend(value)
+            pending.extend((path, item) for item in value)
     return False
+
+
+def _poetry_python_constraint(path: tuple[str, ...], value: object) -> bool:
+    """Only ``[tool.poetry.dependencies] python = "<version>"`` declares nothing."""
+    return (
+        path == ("poetry", "dependencies")
+        and isinstance(value, dict)
+        and set(value) == {"python"}
+        and isinstance(value["python"], str)
+    )
 
 
 class _Reader:

@@ -142,7 +142,8 @@ A `pyproject.toml` counts as declaring dependencies if `project.dependencies`,
 `project.optional-dependencies`, or `dependency-groups` is non-empty, if
 `project.dynamic` lists dependencies, or if **any** non-empty key under
 `[tool]` mentions "depend" (Poetry, PDM, uv, Hatch, and tools not yet known),
-except a Poetry table that only constrains the Python version. This errs toward
+except `[tool.poetry.dependencies]` when its only entry is a `python` version
+string. This errs toward
 reporting a gap: a missed table would hide unassessed dependencies, while an
 extra match only keeps coverage `incomplete`. A file that cannot be parsed is
 also reported.

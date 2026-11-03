@@ -176,6 +176,10 @@ def test_inventory_discovers_nested_hidden_and_unsupported(tmp_path: Path) -> No
         '[project]\nname = "x"\ndynamic = ["dependencies"]\n',
         '[project]\nname = "x"\noptional-dependencies = {test = ["pytest"]}\n',
         '[dependency-groups]\ntest = ["pytest"]\n',
+        # A group named "python" is not Poetry's Python-version constraint.
+        '[tool.pdm.dev-dependencies]\npython = ["Django==2.2.0"]\n',
+        '[tool.hatch.envs.default]\ndependencies = {python = "Django==2.2.0"}\n',
+        '[tool.poetry.group.dev.dependencies]\npython = "^3.12"\npytest = "^7"\n',
         "a = " + "[" * 5000 + "]" * 5000 + "\n",
     ],
     ids=[
@@ -188,6 +192,9 @@ def test_inventory_discovers_nested_hidden_and_unsupported(tmp_path: Path) -> No
         "dynamic",
         "optional",
         "groups",
+        "pdm-python-group",
+        "hatch-python-key",
+        "poetry-group-with-python",
         "deeply-nested",
     ],
 )
