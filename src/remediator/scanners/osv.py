@@ -216,6 +216,24 @@ def normalize(
                             )
                         )
                         continue
+                    reported = package.package
+                    if not reported.name.strip() or any(
+                        value and not value.strip()
+                        for value in (reported.ecosystem, reported.version)
+                    ):
+                        # Blank strings cannot be normalized; keep the rest.
+                        errors.append(
+                            f"source {index} package {package_index}: malformed package"
+                        )
+                        observations.notes.append(
+                            CoverageNote(
+                                reason=CoverageReason.MALFORMED_RECORD,
+                                path=relative,
+                                detail=f"package record {package_index} has a blank "
+                                "name, ecosystem, or version",
+                            )
+                        )
+                        continue
                     observation = _Observation(
                         package.package.name,
                         package.package.ecosystem,
@@ -418,6 +436,25 @@ def _reported(
     packages = [
         _package(observation, path, found, succeeded) for observation in unique.values()
     ]
+    if succeeded and found is not None and found.requirements is not None:
+        # The scanner silently skips some declarations (for example dotted or
+        # one-character names), so every direct declaration must be accounted for.
+        reported = {canonical_name(o.name) for o in source.packages}
+        packages.extend(
+            PackageCoverage(
+                name=name,
+                ecosystem=COVERED_ECOSYSTEM,
+                assessment=PackageAssessment.NOT_ASSESSED,
+                notes=[
+                    CoverageNote(
+                        reason=CoverageReason.NOT_REPORTED_BY_SCANNER,
+                        detail="declared in this manifest but the scanner reported "
+                        "no package record for it",
+                    )
+                ],
+            )
+            for name in sorted(set(found.requirements.precision) - reported)
+        )
     return ManifestCoverage(
         path=path,
         status=ManifestStatus.ASSESSED if succeeded else ManifestStatus.UNKNOWN,

@@ -132,7 +132,7 @@ def _unsupported(name: str, parent: str, read: "_Reader") -> str | None:
             return "pyproject.toml could not be inspected"
         try:
             data = tomllib.loads(text)
-        except tomllib.TOMLDecodeError:
+        except (tomllib.TOMLDecodeError, RecursionError):
             return "pyproject.toml could not be parsed"
         if _declares_dependencies(data):
             return "pyproject.toml dependency declarations are not extracted"
@@ -140,23 +140,36 @@ def _unsupported(name: str, parent: str, read: "_Reader") -> str | None:
 
 
 def _declares_dependencies(data: dict[str, object]) -> bool:
-    def table(value: object, *keys: str) -> object:
-        for key in keys:
-            value = value.get(key) if isinstance(value, dict) else None
-        return value
+    """Err toward "declares": a missed table would hide unassessed dependencies.
 
-    poetry = table(data, "tool", "poetry", "dependencies")
-    groups = table(data, "tool", "poetry", "group")
-    return bool(
-        table(data, "project", "dependencies")
-        or table(data, "project", "optional-dependencies")
-        or data.get("dependency-groups")
-        or (isinstance(poetry, dict) and set(poetry) - {"python"})
-        or (
-            isinstance(groups, dict)
-            and any(table(g, "dependencies") for g in groups.values())
-        )
-    )
+    Standard fields are checked exactly. Under ``[tool]``, any non-empty key
+    mentioning "depend" counts (Poetry, PDM, uv, Hatch, and tools not yet
+    known), except a Poetry table that only constrains the Python version.
+    """
+    project = data.get("project")
+    if isinstance(project, dict):
+        if project.get("dependencies") or project.get("optional-dependencies"):
+            return True
+        dynamic = project.get("dynamic")
+        if isinstance(dynamic, list) and {
+            "dependencies",
+            "optional-dependencies",
+        } & {str(item) for item in dynamic}:
+            return True
+    if data.get("dependency-groups"):
+        return True
+    pending: list[object] = [data.get("tool")]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            for key, child in value.items():
+                python_only = isinstance(child, dict) and set(child) <= {"python"}
+                if "depend" in str(key).lower() and child and not python_only:
+                    return True
+                pending.append(child)
+        elif isinstance(value, list):
+            pending.extend(value)
+    return False
 
 
 class _Reader:

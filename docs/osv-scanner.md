@@ -130,13 +130,22 @@ or builds anything, including `setup.py`.
 | Patterns | Inventory classification |
 |---|---|
 | `*requirements*.txt` (case-sensitive, as OSV matches), `Pipfile.lock`, `pdm.lock`, `poetry.lock`, `uv.lock` | Supported: must be reported by the scanner |
-| `setup.py`; `setup.cfg` and `pyproject.toml` that declare dependencies; `Pipfile`; `pylock*.toml`; `*requirements*.in`; case variants such as `Requirements.txt`; `*.txt` inside a `requirements/` directory | Unsupported: declared dependencies are not assessed |
+| `setup.py`; `setup.cfg` and `pyproject.toml` that declare dependencies (see below); `Pipfile`; `pylock*.toml`; `*requirements*.in`; case variants such as `Requirements.txt`; `*.txt` inside a `requirements/` directory | Unsupported: declared dependencies are not assessed |
 | Any symlink whose own name matches a supported or unsupported pattern | Excluded manifest: never followed by the inventory or OSV-Scanner |
 | Every other symlink | Limitation: its target is never examined, not even to learn whether it is a directory that could hide manifests |
 
 These patterns mirror the osv-scalibr v0.4.0 extractors enabled by OSV-Scanner
 v2.3.0 source scans (`requirements`, `pipfilelock`, `pdmlock`, `poetrylock`,
 `uvlock`). Other ecosystems are not inventoried.
+
+A `pyproject.toml` counts as declaring dependencies if `project.dependencies`,
+`project.optional-dependencies`, or `dependency-groups` is non-empty, if
+`project.dynamic` lists dependencies, or if **any** non-empty key under
+`[tool]` mentions "depend" (Poetry, PDM, uv, Hatch, and tools not yet known),
+except a Poetry table that only constrains the Python version. This errs toward
+reporting a gap: a missed table would hide unassessed dependencies, while an
+extra match only keeps coverage `incomplete`. A file that cannot be parsed is
+also reported.
 
 Symlinks are classified by their own names only; the inventory never calls
 `stat` on a link target. As a result, any symlink under the target keeps
@@ -159,6 +168,16 @@ did not succeed). Per package:
   without wildcards; `imprecise` for any other constraint; and `unknown` when
   the package is not declared directly in the reported manifest (for example via
   `-r`), declared inconsistently, or the manifest could not be inspected.
+
+- Every package declared directly in a reported requirements file must be
+  accounted for. OSV-Scanner v2.3.0 silently skips some declarations (for
+  example dotted names such as `zope.interface` and one-character names), so
+  each declaration without a scanner package record is listed as `not_assessed`
+  with reason `not_reported_by_scanner`. Lockfile contents are not parsed: with
+  the real v2.3.0 binary, the `poetry.lock` and `uv.lock` extractors reported
+  every entry, including names the requirements extractor skips.
+- A scanner package record with a blank name, ecosystem, or version is a
+  malformed-record diagnostic. It never aborts normalization of the rest.
 
 Only `assessed` with `exact` precision counts as **confidently assessed**.
 Everything else carries a reason. A supported manifest the scanner did not

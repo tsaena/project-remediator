@@ -137,6 +137,59 @@ def test_inventory_discovers_nested_hidden_and_unsupported(tmp_path: Path) -> No
     assert not result.limitations
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[tool.poetry.dev-dependencies]\npytest = "^7"\n',
+        '[tool.poetry.group.test.dependencies]\npytest = "^7"\n',
+        '[tool.poetry.dependencies]\npython = "^3.12"\nrequests = "^2"\n',
+        '[tool.uv]\ndev-dependencies = ["pytest==7.0"]\n',
+        '[tool.pdm.dev-dependencies]\ntest = ["pytest==7.0"]\n',
+        '[tool.hatch.envs.test]\ndependencies = ["pytest==7.0"]\n',
+        '[project]\nname = "x"\ndynamic = ["dependencies"]\n',
+        '[project]\nname = "x"\noptional-dependencies = {test = ["pytest"]}\n',
+        '[dependency-groups]\ntest = ["pytest"]\n',
+        "a = " + "[" * 5000 + "]" * 5000 + "\n",
+    ],
+    ids=[
+        "poetry-dev",
+        "poetry-group",
+        "poetry-main",
+        "uv-dev",
+        "pdm-dev",
+        "hatch-env",
+        "dynamic",
+        "optional",
+        "groups",
+        "deeply-nested",
+    ],
+)
+def test_pyproject_dependency_declarations_are_unsupported(
+    tmp_path: Path, text: str
+) -> None:
+    """Any dependency table, known or not, keeps pyproject.toml visible."""
+    write(tmp_path, "pyproject.toml", text)
+    found = inventory(tmp_path).manifests["pyproject.toml"]
+    assert not found.supported
+    assert [n.reason for n in found.notes] == [CoverageReason.UNSUPPORTED_FORMAT]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[tool.poetry.dependencies]\npython = "^3.12"\n',
+        "[tool.ruff]\nline-length = 88\n",
+        '[build-system]\nrequires = ["hatchling"]\n',
+        '[project]\nname = "x"\ndependencies = []\n',
+    ],
+)
+def test_pyproject_without_dependencies_is_not_a_manifest(
+    tmp_path: Path, text: str
+) -> None:
+    write(tmp_path, "pyproject.toml", text)
+    assert "pyproject.toml" not in inventory(tmp_path).manifests
+
+
 def test_inventory_never_follows_symlinks(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     outside = tmp_path / "outside"

@@ -504,7 +504,8 @@ def test_real_scanner_coverage(tmp_path: Path) -> None:
     assert clean.coverage.status == CoverageStatus.NO_KNOWN_GAPS
 
     target_files = {
-        "requirements.txt": "six==1.16.0\nrequests>=2.0\nidna>=2,<3\n",
+        "requirements.txt": "six==1.16.0\nrequests>=2.0\nidna>=2,<3\n"
+        "zope.interface==5.0\n",
         "services/api/requirements.txt": "Django==2.1.0\n",
         "empty/requirements.txt": "# no dependencies\n",
         ".gitignore": "vendor/\n",
@@ -530,6 +531,8 @@ def test_real_scanner_coverage(tmp_path: Path) -> None:
     assert packages["six"].confidently_assessed
     assert packages["requests"].version_precision == VersionPrecision.IMPRECISE
     assert packages["idna"].assessment == PackageAssessment.NOT_ASSESSED
+    # The real scanner silently drops dotted names; coverage must not.
+    assert packages["zope-interface"].assessment == PackageAssessment.NOT_ASSESSED
     reasons = {n.reason for n in result.coverage.limitations}
     assert reasons >= {
         CoverageReason.NO_DEPENDENCY_ENTRIES,
@@ -537,6 +540,7 @@ def test_real_scanner_coverage(tmp_path: Path) -> None:
         CoverageReason.UNSUPPORTED_FORMAT,
         CoverageReason.IMPRECISE_CONSTRAINT,
         CoverageReason.MISSING_VERSION,
+        CoverageReason.NOT_REPORTED_BY_SCANNER,
     }
     assert any(
         f.vulnerability.primary_id == "GHSA-6c3j-c64m-qhgq" for f in result.findings

@@ -237,6 +237,52 @@ def test_any_other_symlink_blocks_coverage(tmp_path: Path) -> None:
     ]
 
 
+def test_declarations_the_scanner_skipped_are_not_assessed(tmp_path: Path) -> None:
+    """OSV-Scanner v2.3.0 silently drops dotted and one-character names."""
+    write(tmp_path, "requirements.txt", "six==1.16.0\nzope.interface==5.0\nx==1.0\n")
+    result = normalized(scan_output("all-packages-clean.json", tmp_path), tmp_path)
+    assert result.status == ScanStatus.SUCCESS
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    packages = {p.name: p for p in manifest(result, "requirements.txt").packages}
+    assert packages["six"].confidently_assessed
+    for name in ("zope-interface", "x"):
+        assert packages[name].assessment == PackageAssessment.NOT_ASSESSED
+        assert packages[name].version is None
+        assert [n.reason for n in packages[name].notes] == [
+            CoverageReason.NOT_REPORTED_BY_SCANNER
+        ]
+
+
+@pytest.mark.parametrize(
+    "package",
+    [
+        {"name": "", "version": "1.0", "ecosystem": "PyPI"},
+        {"name": "  ", "version": "1.0", "ecosystem": "PyPI"},
+        {"name": "six", "version": " ", "ecosystem": "PyPI"},
+        {"name": "six", "version": "1.0", "ecosystem": "\t"},
+    ],
+)
+def test_blank_package_strings_keep_sibling_findings(
+    tmp_path: Path, package: dict[str, str]
+) -> None:
+    mixed_repository(tmp_path)
+    document = json.loads(scan_output("all-packages-mixed.json", tmp_path))
+    document["results"][0]["packages"].append({"package": package})
+    result = normalized(json.dumps(document).encode(), tmp_path)
+    # The malformed record is a diagnostic; valid findings survive.
+    assert result.status == ScanStatus.PARTIAL
+    assert any("malformed package" in error for error in result.errors)
+    assert {f.component.name for f in result.findings} == {
+        "requests",
+        "flask",
+        "django",
+    }
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.UNKNOWN
+    assert CoverageReason.MALFORMED_RECORD in reasons(result)
+
+
 def test_lockfile_versions_are_exact(tmp_path: Path) -> None:
     write(tmp_path, "poetry.lock", '[[package]]\nname = "six"\nversion = "1.16.0"\n')
     document = json.loads(scan_output("all-packages-clean.json", tmp_path))
