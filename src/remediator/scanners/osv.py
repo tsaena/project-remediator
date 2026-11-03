@@ -476,6 +476,27 @@ def _reported(
             )
             for name in sorted(set(found.requirements.precision) - reported)
         )
+        # Each exact pin needs its own record: markers can pin several versions.
+        observed = {(canonical_name(o.name), o.version) for o in source.packages}
+        packages.extend(
+            PackageCoverage(
+                name=name,
+                ecosystem=COVERED_ECOSYSTEM,
+                version=version,
+                assessment=PackageAssessment.NOT_ASSESSED,
+                notes=[
+                    CoverageNote(
+                        reason=CoverageReason.NOT_REPORTED_BY_SCANNER,
+                        detail=f"pinned version {version} has no scanner package "
+                        "record",
+                    )
+                ],
+            )
+            for name, versions in sorted(found.requirements.pins.items())
+            if name in reported
+            for version in sorted(versions)
+            if (name, version) not in observed
+        )
     return ManifestCoverage(
         path=path,
         status=ManifestStatus.ASSESSED if succeeded else ManifestStatus.UNKNOWN,
@@ -570,6 +591,13 @@ def _precision(
         return precision, CoverageNote(
             reason=CoverageReason.PRECISION_UNDETERMINED,
             detail="conflicting declarations in this manifest",
+        )
+    pinned = found.requirements.pins.get(canonical_name(observation.name), set())
+    if observation.version not in pinned:
+        return VersionPrecision.UNKNOWN, CoverageNote(
+            reason=CoverageReason.PRECISION_UNDETERMINED,
+            detail=f"reported version {observation.version} is not an exact pin in "
+            f"this manifest (pinned: {', '.join(sorted(pinned))})",
         )
     return precision, None
 

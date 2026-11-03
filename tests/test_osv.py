@@ -502,6 +502,15 @@ def test_real_scanner_coverage(tmp_path: Path) -> None:
     assert clean.status == "success" and not clean.findings
     assert clean.coverage is not None
     assert clean.coverage.status == CoverageStatus.NO_KNOWN_GAPS
+    # The real scanner reports every marker-split pin, so both reconcile.
+    split = scan(
+        {
+            "requirements.txt": "six==1.15.0 ; python_version < '3.10'\n"
+            "six==1.16.0 ; python_version >= '3.10'\n"
+        }
+    )
+    assert split.coverage is not None
+    assert split.coverage.status == CoverageStatus.NO_KNOWN_GAPS
 
     target_files = {
         "requirements.txt": "six==1.16.0\nrequests>=2.0\nidna>=2,<3\n"

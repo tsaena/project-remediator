@@ -165,7 +165,8 @@ did not succeed). Per package:
   is `not_assessed`: OSV filtered it before matching. Other ecosystems are
   `unknown`; their coverage semantics are not documented here.
 - `version_precision` is `exact` for lockfiles and for direct `==`/`===` pins
-  without wildcards; `imprecise` for any other constraint; and `unknown` when
+  without wildcards whose pinned version is exactly the version the scanner
+  reported; `imprecise` for any other constraint; and `unknown` when
   the package is not declared directly in the reported manifest (for example via
   `-r`), declared inconsistently, or the manifest could not be inspected.
 
@@ -173,7 +174,8 @@ did not succeed). Per package:
   accounted for. OSV-Scanner v2.3.0 silently skips some declarations (for
   example dotted names such as `zope.interface` and one-character names), so
   each declaration without a scanner package record is listed as `not_assessed`
-  with reason `not_reported_by_scanner`. Lockfile contents are not parsed: with
+  with reason `not_reported_by_scanner`. Exact pins are reconciled per version,
+  because environment markers can pin one package to several versions. Lockfile contents are not parsed: with
   the real v2.3.0 binary, the `poetry.lock` and `uv.lock` extractors reported
   every entry, including names the requirements extractor skips.
 - Requirement lines whose declarations cannot be reconciled are limitations on

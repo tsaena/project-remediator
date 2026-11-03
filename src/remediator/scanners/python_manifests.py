@@ -68,12 +68,15 @@ class Requirements:
     # Lines that declare something not attributable to a named package, such
     # as editable installs, paths, and bare URLs; OSV-Scanner skips them.
     unrecognized: list[str] = field(default_factory=list)
+    # Exact pins per canonical name; markers can pin one name to several.
+    pins: dict[str, set[str]] = field(default_factory=dict)
 
 
 def parse_requirements(text: str) -> Requirements:
     precision: dict[str, VersionPrecision] = {}
     includes: list[str] = []
     unrecognized: list[str] = []
+    pins: dict[str, set[str]] = {}
     has_entries = False
     for line in text.replace("\\\n", " ").splitlines():
         line = _COMMENT.sub("", line).strip()
@@ -101,10 +104,12 @@ def parse_requirements(text: str) -> Requirements:
         exact = _EXACT.fullmatch(rest)
         found = VersionPrecision.EXACT if exact else VersionPrecision.IMPRECISE
         name = canonical_name(match.group())
+        if exact:
+            pins.setdefault(name, set()).add(exact.group(1))
         if precision.get(name, found) != found:
             found = VersionPrecision.UNKNOWN
         precision[name] = found
-    return Requirements(precision, has_entries, includes, unrecognized)
+    return Requirements(precision, has_entries, includes, unrecognized, pins)
 
 
 def is_supported(name: str) -> bool:

@@ -254,6 +254,68 @@ def test_declarations_the_scanner_skipped_are_not_assessed(tmp_path: Path) -> No
         ]
 
 
+def six_record(tmp_path: Path, *versions: str) -> bytes:
+    return json.dumps(
+        {
+            "results": [
+                {
+                    "source": {
+                        "path": str(tmp_path / "requirements.txt"),
+                        "type": "lockfile",
+                    },
+                    "packages": [
+                        {"package": {"name": "six", "version": v, "ecosystem": "PyPI"}}
+                        for v in versions
+                    ],
+                }
+            ]
+        }
+    ).encode()
+
+
+def test_reported_version_must_match_an_exact_pin(tmp_path: Path) -> None:
+    write(tmp_path, "requirements.txt", "six==1.16.0\n")
+    result = normalized(six_record(tmp_path, "1.15.0"), tmp_path)
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    packages = manifest(result, "requirements.txt").packages
+    reported = next(p for p in packages if p.version == "1.15.0")
+    assert reported.version_precision == VersionPrecision.UNKNOWN
+    assert not reported.confidently_assessed
+    # The pin itself has no scanner record, so it is explicitly unassessed.
+    pinned = next(p for p in packages if p.version == "1.16.0")
+    assert pinned.assessment == PackageAssessment.NOT_ASSESSED
+
+
+@pytest.mark.parametrize(
+    ("reported", "status"),
+    [
+        (("1.15.0", "1.16.0"), CoverageStatus.NO_KNOWN_GAPS),
+        (("1.16.0",), CoverageStatus.INCOMPLETE),
+    ],
+)
+def test_marker_split_pins_are_each_reconciled(
+    tmp_path: Path, reported: tuple[str, ...], status: CoverageStatus
+) -> None:
+    write(
+        tmp_path,
+        "requirements.txt",
+        "six==1.15.0 ; python_version < '3.10'\n"
+        "six==1.16.0 ; python_version >= '3.10'\n",
+    )
+    result = normalized(six_record(tmp_path, *reported), tmp_path)
+    assert result.coverage is not None
+    assert result.coverage.status == status
+    if status == CoverageStatus.INCOMPLETE:
+        [missing] = [
+            p
+            for p in manifest(result, "requirements.txt").packages
+            if p.assessment == PackageAssessment.NOT_ASSESSED
+        ]
+        assert missing.version == "1.15.0"
+        assert missing.notes[0].reason == CoverageReason.NOT_REPORTED_BY_SCANNER
+
+
 @pytest.mark.parametrize("include", ["-r base.in", "--requirement=base.in"])
 def test_requirement_includes_block_coverage(tmp_path: Path, include: str) -> None:
     """Included declarations may be skipped (or, for --requirement, never read)."""
