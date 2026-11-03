@@ -14,7 +14,8 @@ are not implemented.
 engineering principles. [The roadmap](docs/roadmap.md) describes the milestone
 sequence and current development direction. Contributors and coding agents
 should read both before proposing significant changes; Claude Code also reads
-[`CLAUDE.md`](CLAUDE.md).
+[`CLAUDE.md`](CLAUDE.md), and Codex reads [`AGENTS.md`](AGENTS.md). Security
+assumptions for reviewers are in [the threat model](docs/threat-model.md).
 
 ## Prerequisites
 
@@ -115,5 +116,12 @@ The CLI requires POSIX process groups and secure file creation (validated on Lin
 Scans recurse into nested manifests, use an adapter-owned OSV configuration, and
 bound combined stdout/stderr with `--max-output-bytes`. Output files must be new,
 outside the target, and reached without symlinks; they are created with mode 0600.
-The scanner still honors `.gitignore`, so success does not guarantee complete
-repository coverage. No API scan endpoint or remediation is included.
+Each report records **coverage evidence**: which Python manifests and packages
+were actually assessed, and an explicit reason for every manifest or package
+that was not (ignored, empty, unsupported, symlinked, unversioned, or imprecise).
+A successful scan with zero findings is not, by itself, evidence of a clean
+repository. Reports also record **provenance**: scanner version, exact command,
+execution window, exit code, and whether the advisory data was the live OSV API
+or a fingerprinted offline database (`--offline-database`). See
+[coverage evidence](docs/osv-scanner.md#coverage-evidence). No API scan endpoint
+or remediation is included.
