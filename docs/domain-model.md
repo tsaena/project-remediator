@@ -9,6 +9,8 @@ health endpoint and documentation.
 
 - `Asset`: `type` is `repository` or `container_image`; `locator` identifies the
   assessed repository or image. A package is a component, never an asset.
+  Optional `key` is a caller-supplied stable identity. Locators such as checkout
+  paths are not identity; future cross-scan comparison will require a key.
 - `Component`: `name`, `ecosystem`, and `installed_version` are required;
   `location` optionally identifies a manifest, file, or scanner target location.
   Versions and ecosystems are opaque strings; no version comparison is implied.
@@ -24,7 +26,16 @@ health endpoint and documentation.
 - `Finding`: composes an `asset`, `component`, `vulnerability`, `evidence`, and
   `fix`. No database IDs, exploitation assertions, or remediation state exist.
 - `ScanResult`: an opaque scanner `execution_id`, one `asset` and `scanner`,
-  explicit `status`, normalized `findings`, and diagnostic `errors`.
+  explicit `status`, normalized `findings`, and diagnostic `errors`. Schema
+  version 2 adds optional `coverage` and `provenance`.
+- `ScanCoverage`: what was actually assessed. An overall `status`
+  (`no_known_gaps`, `incomplete`, or `unknown`), the `inventory` scope and
+  limits, per-manifest `ManifestCoverage` with per-package `PackageCoverage`,
+  and `limitations`, each a `CoverageNote` with a machine-readable `reason`.
+- `ScanProvenance`: execution window, exit code, exact command,
+  `advisory_source` (kind, reproducibility, `Fingerprint`s), artifact URIs, and
+  `ProvenanceFact`s whose `origin` is `scanner` (reported by the scanner) or
+  `adapter` (configured, observed, or computed by our code).
 
 ## Validation and tradeoffs
 
@@ -74,13 +85,46 @@ They use ordinary mutable Pydantic collections; callers should revalidate after
 editing a payload. `model_construct` and `model_copy(update=...)` bypass validation
 and should not be used to accept untrusted observations.
 
+## Coverage and provenance semantics
+
+These records are scanner-neutral; adapters define how they are populated (see
+the [OSV-Scanner guide](osv-scanner.md#coverage-evidence)). The models enforce
+that coverage claims are internally consistent:
+
+- `no_known_gaps` requires a finished (not truncated) inventory, at least one
+  manifest, every manifest `assessed` without notes, every package confidently
+  assessed (`assessed` with `exact` version precision), and no limitations. It
+  is bounded by the documented inventory scope; it never means complete.
+- `incomplete` and `unknown` require at least one limitation.
+- A `partial` or `failed` scan can never carry `no_known_gaps` coverage.
+- A package `assessed` must have an ecosystem and version, and any package not
+  confidently assessed must have a note. Only `assessed` or `unknown` manifests
+  may list packages; other manifest states require a note.
+- An unavailable `ProvenanceFact` (null `value`) requires a `detail`. Only a
+  fingerprinted `local_database` advisory source may be `reproducible`. A scan
+  cannot finish before it starts, and timestamps must be timezone-aware.
+
+### Schema versions and compatibility
+
+`schema_version` defaults to `1`, so reports written before coverage and
+provenance existed still load unchanged, with `coverage`, `provenance`, and
+`Asset.key` absent. Version 1 payloads cannot carry those fields. New reports
+are version `2`. Because every model forbids unknown fields, **version 2 reports
+cannot be loaded by code that predates version 2**; upgrade readers before
+writers. All new fields are optional and additive, and no existing field changed
+meaning.
+
 ## Examples
 
 The offline, entirely synthetic examples in
 [`repository_scan.json`](../tests/fixtures/repository_scan.json) and
 [`container_image_scan.json`](../tests/fixtures/container_image_scan.json)
 show both asset types, source aliases, artifact references, optional scanner
-versions, and different fix states. They are not scanner report schemas.
+versions, and different fix states. They are version 1 reports and serve as
+backward-compatibility fixtures. [`repository_coverage_scan.json`](../tests/fixtures/repository_coverage_scan.json)
+is a synthetic version 2 report with `incomplete` coverage (an imprecise
+constraint and an unsupported `setup.py`) and provenance from a fingerprinted
+offline database. None of them is a scanner report schema.
 
 ```python
 from pathlib import Path
@@ -95,4 +139,5 @@ assert ScanResult.model_validate_json(encoded) == scan
 ```
 
 Scanner execution/parsing, enrichment, storage, package-version comparison,
-remediation, verification, and new endpoints are intentionally excluded.
+cross-scan correlation, remediation, verification verdicts, and new endpoints
+are intentionally excluded.

@@ -51,11 +51,16 @@ discovery, timeouts, bounded output, and process-group cleanup. See the
 [Issue #6](https://github.com/tsaena/project-remediator/issues/6) ·
 [PR #7](https://github.com/tsaena/project-remediator/pull/7) (merged).
 
-Known limitations carried forward: scanner version is not recorded, fix
+Known limitations carried forward: fix
 information is always `unknown`, related advisory IDs are separate findings,
 and execution is bounded but not isolated.
 
 ## 🔜 Milestone 4 — Remediation prerequisites
+
+Progress: scan coverage and provenance ([issue #9](https://github.com/tsaena/project-remediator/issues/9)) records which manifests
+and packages were actually assessed and which scanner, settings, and advisory
+source produced a report. Advisory grouping, finding identity, and fixed
+versions remain.
 
 **Goal:** trustworthy fixed-version intelligence and stable finding
 correlation. Planning needs the first; verification needs the second.

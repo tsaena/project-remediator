@@ -10,8 +10,13 @@ The executable is trusted configuration; do not select one from an untrusted rep
 uv sync --locked
 uv run python -m remediator.cli tests/fixtures/vulnerable-python \
   --executable /path/to/osv-scanner --artifacts /tmp/remediator-artifacts \
-  --output /tmp/normalized-scan.json
+  --asset-key example/vulnerable-python --output /tmp/normalized-scan.json
 ```
+
+Optional flags: `--asset-key KEY` records a caller-chosen stable identity on the
+asset (checkout paths are not identity; future cross-scan comparison will require
+it), and `--offline-database DIR` selects a local OSV database (see
+[Provenance](#provenance)).
 
 The developer CLI emits `ScanResult.model_dump_json(indent=2)`. Its exit code is
 0 for successful scans (including vulnerability findings), 2 for partial/failed
@@ -26,14 +31,18 @@ scans or invalid CLI configuration. A typical finding includes:
 
 Actual output also contains advisory IDs/aliases, source text and references,
 repository asset, execution ID, scanner identity, UTC observation time and an
-artifact URI. Advisory IDs and package spelling are preserved. Scanner version
-is null: the adapter does not infer a version from the executable filename.
-Record `osv-scanner --version` alongside a development run for reproducibility.
+artifact URI. Advisory IDs and package spelling are preserved. Reports use
+schema version 2 and also carry [coverage evidence](#coverage-evidence) and
+[provenance](#provenance), including the scanner version that `--version`
+reported (never inferred from the executable name).
 
 ## Execution and artifacts
 
 The command is an explicit argument list with `shell=False`:
-`osv-scanner scan source --format=json --no-resolve --recursive --config ADAPTER_CONFIG ABSOLUTE_DIRECTORY`.
+`osv-scanner scan source --format=json --no-resolve --recursive --all-packages --config ADAPTER_CONFIG ABSOLUTE_DIRECTORY`,
+with `--offline --local-db-path=DIR` inserted before `--config` when an offline
+database is selected. A separate `osv-scanner --version` run precedes it with
+the same process controls, a 30-second cap, and a 64 KiB output bound.
 It does not install dependencies, invoke repository build/test scripts, enable
 call analysis, or perform transitive manifest resolution. This is a baseline
 read-only scan, not OS-level isolation. The adapter writes an empty, private
@@ -71,7 +80,8 @@ polling. These controls do not bound the scanner's own memory/CPU or stop a
 malicious executable escaping its process group. Use a trusted scanner binary;
 stronger enforcement requires a separately configured container/cgroup sandbox.
 
-The adapter retains capped `stdout.json` and `stderr.txt` under
+The adapter retains capped `stdout.json` and `stderr.txt`, plus `version.txt`
+(the bounded `--version` output), under
 `ARTIFACT_DIRECTORY/EXECUTION_ID/`, including for failed and clean scans.
 The artifact reference is the URI of this directory, containing those two files,
 not an individual JSON file. The execution ID ties it to the normalized result.
@@ -97,6 +107,148 @@ BuildKit CA secret without persisting it in the image:
 `docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t project-remediator:local .`.
 Normal builds need no secret and retain normal TLS verification.
 
+## Coverage evidence
+
+**A successful exit and zero findings are not evidence that anything was
+assessed.** OSV-Scanner v2.3.0 omits clean packages unless `--all-packages` is
+passed, never lists empty manifests or `.gitignore`-excluded manifests, reports
+the lower bound of `requests>=2.0` as version `2.0`, and silently skips several
+Python manifest formats. Each report therefore carries a `coverage` record built
+from two independent sources:
+
+1. **Scanner package records** (`--all-packages`), including packages with no
+   advisories.
+2. **An independent, read-only inventory** of Python manifests under the target.
+
+The inventory is bounded (depth 32, 100,000 directory entries) and walks with
+directory file descriptors and `O_NOFOLLOW`, so symlinks are never followed at
+any path component. It skips only `.git`. It reads at most 1 MiB of a manifest
+(and only to classify it: requirement lines, emptiness, or whether
+`pyproject.toml`/`setup.cfg` declare dependencies). It never executes, imports,
+or builds anything, including `setup.py`.
+
+| Patterns | Inventory classification |
+|---|---|
+| `*requirements*.txt` (case-sensitive, as OSV matches), `Pipfile.lock`, `pdm.lock`, `poetry.lock`, `uv.lock` | Supported: must be reported by the scanner |
+| `setup.py`; `setup.cfg` and `pyproject.toml` that declare dependencies (see below); `Pipfile`; `pylock*.toml`; `*requirements*.in`; case variants such as `Requirements.txt`; `*.txt` inside a `requirements/` directory | Unsupported: declared dependencies are not assessed |
+| Any symlink whose own name matches a supported or unsupported pattern | Excluded manifest: never followed by the inventory or OSV-Scanner |
+| Every other symlink | Limitation: its target is never examined, not even to learn whether it is a directory that could hide manifests |
+
+These patterns mirror the osv-scalibr v0.4.0 extractors enabled by OSV-Scanner
+v2.3.0 source scans (`requirements`, `pipfilelock`, `pdmlock`, `poetrylock`,
+`uvlock`). Other ecosystems are not inventoried.
+
+A `pyproject.toml` counts as declaring dependencies if `project.dependencies`,
+`project.optional-dependencies`, or `dependency-groups` is non-empty, if
+`project.dynamic` lists dependencies, or if **any** non-empty key under
+`[tool]` mentions "depend" (Poetry, PDM, uv, Hatch, and tools not yet known),
+except `[tool.poetry.dependencies]` when its only entry is a `python` version
+string. This errs toward
+reporting a gap: a missed table would hide unassessed dependencies, while an
+extra match only keeps coverage `incomplete`. A file that cannot be parsed is
+also reported.
+
+Symlinks are classified by their own names only; the inventory never calls
+`stat` on a link target. As a result, any symlink under the target keeps
+coverage `incomplete`, including those inside an in-tree virtual environment
+(`.venv/bin/python`). Keep virtual environments outside the scanned directory
+when coverage evidence matters. The first 100 unclassified symlinks are listed
+individually and the rest are counted in one summary note. The directory-entry
+limit is enforced while reading each directory, so an oversized directory is
+never read beyond the remaining budget.
+
+Per manifest, `status` is `assessed` (the scanner reported package records),
+`not_reported`, `excluded`, `unsupported`, or `unknown` (reported by a scan that
+did not succeed). Per package:
+
+- `assessment` is `assessed` only for a successful scan, ecosystem `PyPI`, and a
+  non-empty version. An empty version (for example `idna>=2,<3` or `==1.24.*`)
+  is `not_assessed`: OSV filtered it before matching. Other ecosystems are
+  `unknown`; their coverage semantics are not documented here.
+- `version_precision` is `exact` for lockfiles and for direct `==`/`===` pins
+  without wildcards whose pinned version is exactly the version the scanner
+  reported; `imprecise` for any other constraint; and `unknown` when
+  the package is not declared directly in the reported manifest (for example via
+  `-r`), declared inconsistently, or the manifest could not be inspected.
+
+- Every package declared directly in a reported requirements file must be
+  accounted for. OSV-Scanner v2.3.0 silently skips some declarations (for
+  example dotted names such as `zope.interface` and one-character names), so
+  each declaration without a scanner package record is listed as `not_assessed`
+  with reason `not_reported_by_scanner`. Exact pins are reconciled per version,
+  because environment markers can pin one package to several versions. Lockfile contents are not parsed: with
+  the real v2.3.0 binary, the `poetry.lock` and `uv.lock` extractors reported
+  every entry, including names the requirements extractor skips.
+- Requirement lines whose declarations cannot be reconciled are limitations on
+  their manifest: includes (`-r` or `--requirement`, reason
+  `uninspected_include`; OSV-Scanner v2.3.0 follows `-r` but never reads
+  `--requirement=`), and declarations not attributable to a named package
+  (`-e`/`--editable`, local paths, bare URLs, reason
+  `unrecognized_declaration`), which the scanner skips. Constraint files (`-c`)
+  and other options declare no packages and are ignored.
+- A scanner package record with a blank name, ecosystem, or version is a
+  malformed-record diagnostic. It never aborts normalization of the rest.
+
+Only `assessed` with `exact` precision counts as **confidently assessed**.
+Everything else carries a reason. A supported manifest the scanner did not
+report is `not_reported` with reason `no_dependency_entries` (the inventory
+found none), `possibly_ignored` (a `.gitignore` is in scope), or
+`not_reported_by_scanner`. Repository `.gitignore` rules are still honored by
+the scanner, but every exclusion is observable and blocks a coverage claim.
+
+The overall `coverage.status` is:
+
+- `no_known_gaps`: the scan succeeded, the inventory finished, at least one
+  manifest was assessed, and every inventoried manifest and package was
+  confidently assessed. It is bounded by the inventory scope above and the
+  advisory basis; it is **not** a claim of complete repository coverage.
+- `incomplete`: any limitation exists. Each one is listed in `limitations` with a
+  machine-readable `reason`, a path, and a detail.
+- `unknown`: the scan was partial or failed, or its output was unusable.
+  Observations are kept as diagnostics only, and packages are `unknown`.
+
+Scanner sources outside the target keep their findings (they are still
+evidence) but never count toward coverage.
+
+## Provenance
+
+`provenance` records evidence about how the report was produced. Each fact
+states its origin: `scanner` facts were reported by the scanner itself, and
+`adapter` facts were configured, observed, or computed by this adapter. A value
+that could not be obtained is null with a `detail` explaining why; nothing is
+inferred.
+
+| Field | Origin | Contents |
+|---|---|---|
+| `scanner.version`, facts `scanner_version`, `scalibr_version`, `scanner_commit`, `scanner_build_date` | scanner | Parsed from `--version`. Missing or unparseable output stays unavailable. A non-2.x version makes the scan fail |
+| `command`, `started_at`, `finished_at`, `exit_code` | adapter | The exact argument list and the observed execution window and exit status |
+| `executable`, `executable_sha256` | adapter | The resolved executable and its digest (of a wrapper, if one is used) |
+| `configuration`, `configuration_sha256` | adapter | The adapter-owned override configuration |
+| `timeout_seconds`, `max_output_bytes` | adapter | Execution bounds |
+| `inherited_osv_environment` | adapter | Names (never values) of inherited `OSV_*` variables, which can influence the scanner |
+| `advisory_source` | adapter | See below |
+| `artifacts` | adapter | URIs of retained `stdout.json`, `stderr.txt`, and `version.txt` |
+
+`advisory_source.kind` is `online_service` by default: OSV-Scanner queried the
+live OSV API, which is time-bound and **never reproducible**. With
+`--offline-database DIR`, the scanner runs with `--offline` against
+`DIR/osv-scanner/<ecosystem>/all.zip` and never downloads. The adapter records
+SHA-256 digests of the archives before and after the scan. It is `reproducible`
+only if archives exist and are unchanged; a change during the scan is an error.
+OSV-Scanner does not report which archives it loaded, so all present archives
+are fingerprinted. The database and the target must not contain each other in
+either direction, because repository-controlled advisory data would undermine
+verification. For the same
+reason, a symlink at any component below it (`osv-scanner/`, an ecosystem
+directory, or `all.zip`) is rejected before the scan, since it could point back
+into the target; archives are hashed through `O_NOFOLLOW` opens. A symlink that
+appears during the scan fails it and marks the source non-reproducible.
+`--local-db-path` is a hidden OSV-Scanner flag; if a later version drops it,
+the scan fails rather than silently going online.
+
+Coverage status and advisory reproducibility are independent: an online scan
+can have `no_known_gaps` coverage while its advisory basis is not reproducible.
+
 ## Mapping and limits
 
 The schema and exit codes were checked against v2.3.0 upstream
@@ -121,8 +273,9 @@ version or select upgrade candidates. It never copies unrelated package fixes,
 claims no fix, or invents versions. Severity and CVSS are not derived from scores;
 severity remains null. Original advisory references, summary and details are
 mapped when present. Full affected ranges, scores, source type and scanner-only
-metadata are retained in the separate raw artifact. Domain models and FastAPI
-behavior are unchanged.
+metadata are retained in the separate raw artifact. With `--all-packages`,
+package records without advisories produce coverage entries, not findings or
+errors. FastAPI behavior is unchanged.
 
 ## Tests and live demo
 
@@ -149,26 +302,34 @@ stderr overflow, and descendant cleanup (including an already-exited leader).
 CLI tests cover output containment, overwrite rejection, parent/final symlinks,
 file modes and understandable errors. Default tests require no network or scanner.
 
-Two opt-in tests use the real checksum-verified v2.3.0 executable:
+Three opt-in tests use the real checksum-verified v2.3.0 executable:
 
 ```sh
 # No network: generate a temporary OSV cache containing the one public advisory.
 RUN_OSV_INTEGRATION=1 OSV_SCANNER=/path/to/osv-scanner uv run pytest tests/test_osv.py::test_real_scanner_offline -v
+# No network: real coverage behavior for clean, nested, ignored, empty, symlinked cases.
+RUN_OSV_INTEGRATION=1 OSV_SCANNER=/path/to/osv-scanner uv run pytest tests/test_osv.py::test_real_scanner_coverage -v
 # Live API: database/network availability required; advisory data can drift.
 RUN_OSV_INTEGRATION=1 OSV_SCANNER=/path/to/osv-scanner uv run pytest tests/test_osv.py::test_real_scanner -v
 ```
 
-The offline integration test uses OSV's built-in offline matcher through a trusted
-test wrapper. For both advisory and package ignore rules it first proves that a
-normal scan is suppressed, then proves that the adapter reports the known advisory
-from a nested Django 2.1.0 manifest despite root and nested configurations.
-The live test scans nested Django 2.2.0 with attempted repository suppression.
+The offline integration test selects the cached advisory with
+`offline_database`, so the recorded advisory source is exact. For both advisory
+and package ignore rules it first proves that a normal scan is suppressed, then
+proves that the adapter reports the known advisory from a nested Django 2.1.0
+manifest despite root and nested configurations, and that the database is
+recorded as a reproducible, fingerprinted source. `test_real_scanner_coverage`
+scans fully offline: a clean repository must reach `no_known_gaps`, and a
+repository combining nested, empty, ignored, unsupported, imprecise, unversioned,
+and symlinked manifests must report each case with its reason. The live test scans
+nested Django 2.2.0 with attempted repository suppression.
 Never install these deliberately vulnerable fixture dependencies.
 
-Validation for this security correction: Ruff, strict mypy, default pytest,
-Docker build with the proxy CA mounted, and both real offline integration cases
-pass. The live API test was attempted but could not complete because the managed
-network policy returned Forbidden for `api.osv.dev/v1/querybatch`; it is not a
-successful integration test. The official Linux amd64 binary reported 2.3.0,
-commit `b0b6027aa7b2b50fd3fe5fe185d609f481f02a44`, and matched the release checksum
-`e774e5770c31d60745c067be5f69bf3b46641b6d0e0ed87fd65e569cda35dc50`.
+`all-packages-clean.json` and `all-packages-mixed.json` are real OSV-Scanner
+v2.3.0 `--all-packages` output from synthetic repositories, trimmed to one public
+advisory per package with paths rebased to `/repo`. Coverage tests rebuild the
+matching files and run the real inventory, covering clean packages, nested
+manifests, imprecise and unversioned constraints, `-r` includes, empty, ignored,
+unsupported, and symlinked manifests, other ecosystems, and failed and partial
+scans. Each scenario asserts that nothing unassessed is counted as confidently
+assessed.

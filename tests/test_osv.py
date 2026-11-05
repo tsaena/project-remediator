@@ -68,11 +68,29 @@ def test_duplicates() -> None:
     assert len(result.findings) == 1
 
 
-def fake_scanner(tmp_path: Path, body: str) -> str:
+VERSION_OUTPUT = (
+    "osv-scanner version: 2.3.0\nosv-scalibr version: 0.4.0\n"
+    "commit: b0b6027aa7b2b50fd3fe5fe185d609f481f02a44\n"
+    "built at: 2025-11-19T04:12:01Z\n"
+)
+
+
+def fake_scanner(
+    tmp_path: Path, body: str, *, version: str | None = VERSION_OUTPUT
+) -> str:
+    """A real executable; ``--version`` is answered before ``body`` runs."""
     import sys
 
+    prelude = ""
+    if version is not None:
+        prelude = (
+            "import sys as _sys\n"
+            "if _sys.argv[1:] == ['--version']:\n"
+            f"    _sys.stdout.write({version!r})\n"
+            "    _sys.exit(0)\n"
+        )
     script = tmp_path / "fake scanner"
-    script.write_text(f"#!{sys.executable}\n" + body)
+    script.write_text(f"#!{sys.executable}\n" + prelude + body)
     script.chmod(0o700)
     return str(script)
 
@@ -111,7 +129,7 @@ sys.exit({code})
         "stderr": subprocess.PIPE,
         "shell": False,
         "start_new_session": True,
-        "cwd": str(Path(args[6]).parent),
+        "cwd": str(Path(args[7]).parent),
     }
     assert args == [
         "scan",
@@ -119,11 +137,15 @@ sys.exit({code})
         "--format=json",
         "--no-resolve",
         "--recursive",
+        "--all-packages",
         "--config",
-        args[6],
+        args[7],
         str(target),
     ]
-    assert not Path(args[6]).exists()
+    assert not Path(args[7]).exists()
+    assert result.provenance is not None
+    assert result.provenance.command == [executable, *args]
+    assert result.provenance.exit_code == code
     assert result.status == ("success" if code in (0, 1) else "partial")
 
 
@@ -174,7 +196,12 @@ time.sleep(60)
     assert result.status == "failed"
     expected = "output limit" if mode in ("stdout", "stderr") else "timed out"
     assert any(expected in error for error in result.errors)
-    assert sum(p.stat().st_size for p in (tmp_path / "raw").glob("*/*")) <= 1000
+    retained = list((tmp_path / "raw").glob("*/*"))
+    scan_output = [p for p in retained if p.name in ("stdout.json", "stderr.txt")]
+    assert len(scan_output) == 2
+    assert sum(p.stat().st_size for p in scan_output) <= 1000
+    # The separate --version run has its own fixed bound.
+    assert all(p.stat().st_size <= 64 * 1024 for p in retained)
     pid = int(child_pid.read_text())
     # A killed orphan can briefly remain as a zombie until the host reaps it.
     for _ in range(100):
@@ -418,22 +445,127 @@ def test_real_scanner_offline(
     assert not normalize(
         control.stdout, target=target, artifact_reference="test:control"
     ).findings
-    # A trusted test wrapper selects OSV's built-in offline matcher. Production
-    # invocation and configuration remain unchanged; no service is mocked.
-    wrapper = fake_scanner(
-        tmp_path,
-        f"""
-import os, sys
-os.execv({executable!r}, [{executable!r}, *sys.argv[1:], '--offline'])
-""",
+    # The adapter selects the same offline archive explicitly and records it.
+    result = OSVScanner(executable, offline_database=cache).scan(
+        target, artifact_directory=tmp_path / "raw"
     )
-    result = OSVScanner(wrapper).scan(target, artifact_directory=tmp_path / "raw")
     assert result.status == "success", result.errors
     assert any(
         f.vulnerability.primary_id == "GHSA-6c3j-c64m-qhgq"
         and f.component.location == str(nested / "requirements.txt")
         for f in result.findings
     )
+    assert result.scanner.version == "2.3.0"
+    assert result.provenance is not None
+    source = result.provenance.advisory_source
+    assert source is not None and source.reproducible
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_OSV_INTEGRATION") != "1", reason="opt-in real scanner"
+)
+def test_real_scanner_coverage(tmp_path: Path) -> None:
+    """Real OSV-Scanner v2.3.0 behavior for each coverage case, fully offline."""
+    import shutil
+    import zipfile
+
+    from remediator.domain import (
+        CoverageReason,
+        CoverageStatus,
+        ManifestStatus,
+        PackageAssessment,
+        VersionPrecision,
+    )
+
+    executable = shutil.which(os.getenv("OSV_SCANNER", "osv-scanner"))
+    assert executable is not None, "install OSV-Scanner v2.3.0"
+    cache = tmp_path / "cache"
+    (cache / "osv-scanner" / "PyPI").mkdir(parents=True)
+    with zipfile.ZipFile(cache / "osv-scanner" / "PyPI" / "all.zip", "w") as archive:
+        archive.write(FIXTURES / "django-advisory.json", "GHSA-6c3j-c64m-qhgq.json")
+    outside = tmp_path / "outside-requirements.txt"
+    outside.write_text("Django==2.1.0\n")
+
+    def scan(files: dict[str, str]) -> ScanResult:
+        target = tmp_path / f"repo{len(list(tmp_path.glob('repo*')))}"
+        for relative, text in files.items():
+            path = target / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        return OSVScanner(executable, offline_database=cache).scan(
+            target,
+            artifact_directory=tmp_path / "raw",
+            asset_key="example/coverage",
+        )
+
+    clean = scan({"requirements.txt": "six==1.16.0\n"})
+    assert clean.status == "success" and not clean.findings
+    assert clean.coverage is not None
+    assert clean.coverage.status == CoverageStatus.NO_KNOWN_GAPS
+    # The real scanner reports every marker-split pin, so both reconcile.
+    split = scan(
+        {
+            "requirements.txt": "six==1.15.0 ; python_version < '3.10'\n"
+            "six==1.16.0 ; python_version >= '3.10'\n"
+        }
+    )
+    assert split.coverage is not None
+    assert split.coverage.status == CoverageStatus.NO_KNOWN_GAPS
+
+    target_files = {
+        "requirements.txt": "six==1.16.0\nrequests>=2.0\nidna>=2,<3\n"
+        "zope.interface==5.0\n",
+        "services/api/requirements.txt": "Django==2.1.0\n",
+        "empty/requirements.txt": "# no dependencies\n",
+        ".gitignore": "vendor/\n",
+        "vendor/requirements.txt": "Django==2.1.0\n",
+        "requirements/base.txt": "Django==2.1.0\n",
+        "setup.py": "raise SystemExit('never executed')\n",
+    }
+    result = scan(target_files)
+    assert result.status == "success", result.errors
+    assert result.coverage is not None
+    assert result.coverage.status == CoverageStatus.INCOMPLETE
+    manifests = {m.path: m for m in result.coverage.manifests}
+    statuses = {path: m.status for path, m in manifests.items()}
+    assert statuses == {
+        "requirements.txt": ManifestStatus.ASSESSED,
+        "services/api/requirements.txt": ManifestStatus.ASSESSED,
+        "empty/requirements.txt": ManifestStatus.NOT_REPORTED,
+        "vendor/requirements.txt": ManifestStatus.NOT_REPORTED,
+        "requirements/base.txt": ManifestStatus.UNSUPPORTED,
+        "setup.py": ManifestStatus.UNSUPPORTED,
+    }
+    packages = {p.name: p for p in manifests["requirements.txt"].packages}
+    assert packages["six"].confidently_assessed
+    assert packages["requests"].version_precision == VersionPrecision.IMPRECISE
+    assert packages["idna"].assessment == PackageAssessment.NOT_ASSESSED
+    # The real scanner silently drops dotted names; coverage must not.
+    assert packages["zope-interface"].assessment == PackageAssessment.NOT_ASSESSED
+    reasons = {n.reason for n in result.coverage.limitations}
+    assert reasons >= {
+        CoverageReason.NO_DEPENDENCY_ENTRIES,
+        CoverageReason.POSSIBLY_IGNORED,
+        CoverageReason.UNSUPPORTED_FORMAT,
+        CoverageReason.IMPRECISE_CONSTRAINT,
+        CoverageReason.MISSING_VERSION,
+        CoverageReason.NOT_REPORTED_BY_SCANNER,
+    }
+    assert any(
+        f.vulnerability.primary_id == "GHSA-6c3j-c64m-qhgq" for f in result.findings
+    )
+
+    linked = scan({"requirements.txt": "six==1.16.0\n", "sub/keep.txt": ""})
+    assert linked.coverage is not None
+    link_target = Path(linked.asset.locator) / "linked-requirements.txt"
+    link_target.symlink_to(outside)
+    relinked = OSVScanner(executable, offline_database=cache).scan(
+        Path(linked.asset.locator), artifact_directory=tmp_path / "raw"
+    )
+    assert relinked.coverage is not None
+    excluded = {m.path: m for m in relinked.coverage.manifests}
+    assert excluded["linked-requirements.txt"].status == ManifestStatus.EXCLUDED
+    assert not relinked.findings, "the symlinked manifest must not be scanned"
 
 
 @pytest.mark.parametrize("extra", [0, 1])
