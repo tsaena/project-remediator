@@ -107,7 +107,9 @@ The domain contracts add no HTTP endpoints.
 [Finding correlation](docs/correlation.md) relates the findings of two scans of
 the same asset (matched, only before, only after, or ambiguous) and groups
 advisory aliases. It is not verification: a finding that disappeared has not
-been shown to be fixed.
+been shown to be fixed. [Fixed-version candidates](docs/fixes.md) are derived
+for exactly pinned PyPI packages from each advisory's own ranges; a candidate is
+reported evidence, not proof that an upgrade exists or works.
 
 ## License
 

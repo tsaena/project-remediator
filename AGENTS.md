@@ -21,6 +21,9 @@ workflow; they apply to every agent. Security context for reviews is in
   `only_before` is a relationship between observations, never a verdict.
 - Flag correlation changes that turn an uncertain relationship (alias splits or
   merges, duplicate slots, moved manifests, missing asset keys) into a match.
+- Flag fix candidates derived from unconfirmed installed versions, lexical
+  version comparison, other packages' ranges, or disagreeing advisories (never
+  pick the highest fix silently).
 
 ### Evidence and provenance
 

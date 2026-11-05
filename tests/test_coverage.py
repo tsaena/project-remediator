@@ -13,6 +13,7 @@ import pytest
 from test_osv import fake_scanner
 
 from remediator.domain import (
+    CURRENT_SCHEMA_VERSION,
     AdvisorySourceKind,
     CoverageReason,
     CoverageStatus,
@@ -489,7 +490,7 @@ def test_adapter_records_provenance(
         target, artifact_directory=tmp_path / "raw", asset_key="example/demo"
     )
     assert result.status == ScanStatus.SUCCESS
-    assert result.schema_version == 2
+    assert result.schema_version == CURRENT_SCHEMA_VERSION
     assert result.asset.key == "example/demo"
     assert result.scanner.version == "2.3.0"
     assert result.coverage is not None

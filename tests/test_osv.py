@@ -551,9 +551,16 @@ def test_real_scanner_coverage(tmp_path: Path) -> None:
         CoverageReason.MISSING_VERSION,
         CoverageReason.NOT_REPORTED_BY_SCANNER,
     }
-    assert any(
-        f.vulnerability.primary_id == "GHSA-6c3j-c64m-qhgq" for f in result.findings
-    )
+    [advisory] = [
+        f
+        for f in result.findings
+        if f.vulnerability.primary_id == "GHSA-6c3j-c64m-qhgq"
+    ]
+    # Django==2.1.0 is an exact pin inside the advisory's 2.0a1..2.1.9 interval.
+    assert advisory.fix.status == "available"
+    assert advisory.fix.fixed_versions == ["2.1.9"]
+    assert advisory.fix.evidence is not None
+    assert advisory.fix.evidence.introduced == "2.0a1"
 
     linked = scan({"requirements.txt": "six==1.16.0\n", "sub/keep.txt": ""})
     assert linked.coverage is not None

@@ -27,7 +27,10 @@ health endpoint and documentation.
   `fix`. No database IDs, exploitation assertions, or remediation state exist.
 - `ScanResult`: an opaque scanner `execution_id`, one `asset` and `scanner`,
   explicit `status`, normalized `findings`, and diagnostic `errors`. Schema
-  version 2 adds optional `coverage` and `provenance`.
+  version 2 adds optional `coverage` and `provenance`; version 3 adds
+  `Vulnerability.affected` (an advisory's affected ranges for the package) and
+  `FixInformation.evidence` (why a fix status was assigned). See
+  [fixed-version candidates](fixes.md).
 - `ScanCoverage`: what was actually assessed. An overall `status`
   (`no_known_gaps`, `incomplete`, or `unknown`), the `inventory` scope and
   limits, per-manifest `ManifestCoverage` with per-package `PackageCoverage`,
@@ -59,6 +62,10 @@ Fix information always has an explicit semantic state:
 | `unknown` (default) | Empty | No fixed-version information was supplied. |
 | `no_fix` | Empty | Source explicitly reports no fix for this observation. |
 | `available` | Nonempty | Source supplies candidate fixed versions. |
+
+When `evidence` is present, only a `fixed_event` reason makes a fix `available`,
+`fixed_versions` must equal the evidenced fixed event, and `no_fix` is never
+allowed: advisory ranges cannot establish that no fix exists.
 
 Omitting `fix` means **unknown**, never confirmed no fix. A `no_fix` observation
 is limited to its source and observation time; it is not proof that a fix can
@@ -109,9 +116,10 @@ that coverage claims are internally consistent:
 `schema_version` defaults to `1`, so reports written before coverage and
 provenance existed still load unchanged, with `coverage`, `provenance`, and
 `Asset.key` absent. Version 1 payloads cannot carry those fields. New reports
-are version `2`. Because every model forbids unknown fields, **version 2 reports
-cannot be loaded by code that predates version 2**; upgrade readers before
-writers. All new fields are optional and additive, and no existing field changed
+were version `2`; current reports are version `3`, and version 2 payloads
+cannot carry `affected` ranges or fix `evidence`. Because every model forbids
+unknown fields, **a report cannot be loaded by code that predates its schema
+version**; upgrade readers before writers. All new fields are optional and additive, and no existing field changed
 meaning.
 
 ## Examples
