@@ -232,8 +232,9 @@ No pull requests are currently under review.
 
 Known gaps that affect the later stages:
 
-- Fix information is always `unknown`. Fixed versions are not yet derived from
-  advisory data.
+- Fixed-version candidates are derived only for exactly pinned PyPI packages,
+  from each advisory's own ranges ([fixed-version candidates](fixes.md)). A
+  candidate is reported evidence, not proof that an upgrade exists or works.
 - Coverage evidence covers Python manifests only. Packages from other
   ecosystems are reported but not vouched for.
 - By default, scans query the live OSV API, which is not a reproducible

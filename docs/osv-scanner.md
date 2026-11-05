@@ -32,7 +32,8 @@ scans or invalid CLI configuration. A typical finding includes:
 Actual output also contains advisory IDs/aliases, source text and references,
 repository asset, execution ID, scanner identity, UTC observation time and an
 artifact URI. Advisory IDs and package spelling are preserved. Reports use
-schema version 2 and also carry [coverage evidence](#coverage-evidence) and
+schema version 3 and also carry [coverage evidence](#coverage-evidence),
+[fixed-version candidates](fixes.md), and
 [provenance](#provenance), including the scanner version that `--version`
 reported (never inferred from the executable name).
 
@@ -267,10 +268,10 @@ rejected result fails. Optional unknown OSV fields remain in the raw artifact.
 Distinct advisory IDs (even aliases of one another) and manifests remain separate;
 only identical normalized observations in the same run are collapsed.
 
-Fix information stays **unknown**, even when OSV lists fixed range events:
-this first adapter does not establish which range/fix applies to the installed
-version or select upgrade candidates. It never copies unrelated package fixes,
-claims no fix, or invents versions. Severity and CVSS are not derived from scores;
+Fix information is evaluated per advisory from its own affected ranges, and
+only for exactly pinned PyPI packages; see [fixed-version candidates](fixes.md).
+Anything uncertain stays `unknown`, and the adapter never copies unrelated
+package fixes, claims no fix, or invents versions. Severity and CVSS are not derived from scores;
 severity remains null. Original advisory references, summary and details are
 mapped when present. Full affected ranges, scores, source type and scanner-only
 metadata are retained in the separate raw artifact. With `--all-packages`,

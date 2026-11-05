@@ -20,7 +20,7 @@ from remediator.domain import (
     ScanStatus,
 )
 from remediator.domain.models import DomainModel, NonBlank
-from remediator.naming import canonical_pypi_name
+from remediator.naming import normalized_name
 
 
 class ComponentSlot(DomainModel):
@@ -195,10 +195,6 @@ def manifest_path(location: str | None, locator: str) -> str | None:
     if path == "." or path == ".." or path.startswith("../"):
         return None
     return path
-
-
-def normalized_name(ecosystem: str, name: str) -> str:
-    return canonical_pypi_name(name) if ecosystem == "PyPI" else name
 
 
 def component_slot(finding: Finding, asset_key: str) -> ComponentSlot | None:

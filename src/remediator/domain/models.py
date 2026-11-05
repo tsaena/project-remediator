@@ -41,6 +41,39 @@ class Component(DomainModel):
     location: NonBlank | None = None
 
 
+class RangeEvent(DomainModel):
+    """One advisory range event, as reported; exactly one field is set."""
+
+    introduced: NonBlank | None = None
+    fixed: NonBlank | None = None
+    last_affected: NonBlank | None = None
+    limit: NonBlank | None = None
+
+    @model_validator(mode="after")
+    def validate_single(self) -> Self:
+        values = (self.introduced, self.fixed, self.last_affected, self.limit)
+        if sum(v is not None for v in values) != 1:
+            raise ValueError("a range event sets exactly one field")
+        return self
+
+
+class AffectedRange(DomainModel):
+    # As reported, for example ECOSYSTEM, SEMVER, or GIT.
+    type: NonBlank
+    events: list[RangeEvent] = Field(default_factory=list)
+
+
+class AffectedPackage(DomainModel):
+    """An advisory's affected entry for the finding's own package, as reported."""
+
+    ecosystem: NonBlank
+    name: NonBlank
+    ranges: list[AffectedRange] = Field(default_factory=list)
+    # How many versions the advisory lists explicitly; the list itself stays
+    # in the raw scanner artifact.
+    listed_versions: int = Field(default=0, ge=0)
+
+
 class Vulnerability(DomainModel):
     primary_id: NonBlank
     aliases: list[NonBlank] = Field(default_factory=list)
@@ -48,6 +81,7 @@ class Vulnerability(DomainModel):
     description: NonBlank | None = None
     severity: NonBlank | None = None
     references: list[NonBlank] = Field(default_factory=list)
+    affected: list[AffectedPackage] = Field(default_factory=list)
 
 
 class Scanner(DomainModel):
@@ -68,9 +102,56 @@ class FixStatus(StrEnum):
     AVAILABLE = "available"
 
 
+class FixApplicability(StrEnum):
+    AFFECTED = "affected"
+    NOT_AFFECTED = "not_affected"
+    UNKNOWN = "unknown"
+
+
+class FixReason(StrEnum):
+    # The only reason that supports an available candidate.
+    FIXED_EVENT = "fixed_event"
+    INSTALLED_VERSION_UNCONFIRMED = "installed_version_unconfirmed"
+    INVALID_VERSION = "invalid_version"
+    NO_MATCHING_PACKAGE = "no_matching_package"
+    NO_SUPPORTED_RANGE = "no_supported_range"
+    UNSUPPORTED_EVENT = "unsupported_event"
+    INVALID_RANGE = "invalid_range"
+    MALFORMED_AFFECTED = "malformed_affected"
+    OPEN_ENDED = "open_ended"
+    LAST_AFFECTED_ONLY = "last_affected_only"
+    CONFLICTING_RANGES = "conflicting_ranges"
+    NOT_AFFECTED_BY_RANGES = "not_affected_by_ranges"
+    VERSIONS_LIST_DISAGREES = "versions_list_disagrees"
+
+
+class FixEvidence(DomainModel):
+    """Why a fix status was assigned, from one advisory's affected ranges."""
+
+    applicability: FixApplicability
+    reason: FixReason
+    detail: NonBlank | None = None
+    # Bounds of the range interval that contains the installed version.
+    introduced: NonBlank | None = None
+    fixed: NonBlank | None = None
+    last_affected: NonBlank | None = None
+    # Whether the advisory's explicit versions list contains the installed
+    # version; None when it lists no versions.
+    listed_in_versions: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> Self:
+        if self.reason == FixReason.FIXED_EVENT and (
+            self.applicability != FixApplicability.AFFECTED or self.fixed is None
+        ):
+            raise ValueError("a fixed_event candidate needs an affected interval")
+        return self
+
+
 class FixInformation(DomainModel):
     status: FixStatus = FixStatus.UNKNOWN
     fixed_versions: list[NonBlank] = Field(default_factory=list)
+    evidence: FixEvidence | None = None
 
     @model_validator(mode="after")
     def validate_versions(self) -> Self:
@@ -79,6 +160,14 @@ class FixInformation(DomainModel):
                 raise ValueError("available fix information requires fixed_versions")
         elif self.fixed_versions:
             raise ValueError("fixed_versions require available fix status")
+        if self.evidence is not None:
+            if self.status == FixStatus.NO_FIX:
+                raise ValueError("advisory ranges never establish no_fix")
+            candidate = self.evidence.reason == FixReason.FIXED_EVENT
+            if candidate != (self.status == FixStatus.AVAILABLE):
+                raise ValueError("only a fixed_event makes a fix available")
+            if candidate and self.fixed_versions != [self.evidence.fixed]:
+                raise ValueError("fixed_versions must be the evidenced fixed event")
         return self
 
 
@@ -312,12 +401,12 @@ class ScanProvenance(DomainModel):
         return self
 
 
-CURRENT_SCHEMA_VERSION: Literal[2] = 2
+CURRENT_SCHEMA_VERSION: Literal[3] = 3
 
 
 class ScanResult(DomainModel):
     # Reports without this field predate coverage and provenance (version 1).
-    schema_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
     execution_id: NonBlank
     asset: Asset
     scanner: Scanner
@@ -344,6 +433,10 @@ class ScanResult(DomainModel):
             self.coverage or self.provenance or self.asset.key
         ):
             raise ValueError("coverage, provenance, and asset keys need schema 2")
+        if self.schema_version < 3 and any(
+            f.vulnerability.affected or f.fix.evidence for f in self.findings
+        ):
+            raise ValueError("affected ranges and fix evidence need schema 3")
         if (
             self.coverage is not None
             and self.status != ScanStatus.SUCCESS

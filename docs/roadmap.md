@@ -14,8 +14,8 @@ is fixed when the issue is written, not here.
 | 1 | Application foundation | — | ✅ |
 | 2 | Domain contracts | Normalize | ✅ |
 | 3 | First scanner integration | Detect, Normalize | ✅ |
-| 4 | Remediation prerequisites | Normalize → Plan, Verify | 🔜 |
-| 5 | Deterministic remediation planning | Plan | ⏳ |
+| 4 | Remediation prerequisites | Normalize → Plan, Verify | ✅ |
+| 5 | Deterministic remediation planning | Plan | 🔜 |
 | 6 | Remediation application | Apply | ⏳ |
 | 7 | Independent verification | Verify | ⏳ |
 | 8 | Expanded integrations and automation | All | ⏳ |
@@ -55,13 +55,14 @@ Known limitations carried forward: fix
 information is always `unknown`, related advisory IDs are separate findings,
 and execution is bounded but not isolated.
 
-## 🔜 Milestone 4 — Remediation prerequisites
+## ✅ Milestone 4 — Remediation prerequisites
 
 Progress: scan coverage and provenance ([issue #9](https://github.com/tsaena/project-remediator/issues/9)) records which manifests
 and packages were actually assessed and which scanner, settings, and advisory
 source produced a report. Finding correlation and advisory grouping ([issue #10](https://github.com/tsaena/project-remediator/issues/10),
-[guide](correlation.md)) relate findings across scans conservatively. Fixed
-versions remain.
+[guide](correlation.md)) relate findings across scans conservatively.
+Fixed-version candidates ([issue #11](https://github.com/tsaena/project-remediator/issues/11), [guide](fixes.md)) come from each
+advisory's own ranges, only for exactly pinned PyPI packages.
 
 **Goal:** trustworthy fixed-version intelligence and stable finding
 correlation. Planning needs the first; verification needs the second.
@@ -83,7 +84,7 @@ supports them; alias groups and finding identity are deterministic and tested
 against real scanner output; scan results carry the provenance needed to say
 whether two executions are comparable.
 
-## ⏳ Milestone 5 — Deterministic remediation planning
+## 🔜 Milestone 5 — Deterministic remediation planning
 
 **Goal:** explainable, non-executing remediation proposals for supported
 dependency ecosystems, starting with a narrow Python dependency use case (for

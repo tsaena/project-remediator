@@ -19,10 +19,13 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from remediator import fixes
 from remediator.domain import (
     CURRENT_SCHEMA_VERSION,
     AdvisorySource,
     AdvisorySourceKind,
+    AffectedPackage,
+    AffectedRange,
     Asset,
     AssetType,
     Component,
@@ -33,13 +36,17 @@ from remediator.domain import (
     Evidence,
     Finding,
     Fingerprint,
+    FixApplicability,
+    FixEvidence,
     FixInformation,
+    FixReason,
     ManifestCoverage,
     ManifestStatus,
     PackageAssessment,
     PackageCoverage,
     ProvenanceFact,
     ProvenanceOrigin,
+    RangeEvent,
     ScanCoverage,
     Scanner,
     ScanProvenance,
@@ -48,6 +55,7 @@ from remediator.domain import (
     VersionPrecision,
     Vulnerability,
 )
+from remediator.naming import normalized_name
 from remediator.output import directory, private_output
 from remediator.scanners import python_manifests
 from remediator.scanners.python_manifests import (
@@ -93,6 +101,65 @@ class Advisory(Wire):
     summary: str | None = None
     details: str | None = None
     references: list[Reference] = []
+    # Parsed leniently: a malformed entry only limits fix evidence.
+    affected: list[object] = []
+
+
+_EVENT_KINDS = ("introduced", "fixed", "last_affected", "limit")
+
+
+@dataclass
+class _Affected:
+    """An advisory's affected entries for one package, plus listed versions."""
+
+    packages: list[AffectedPackage] = field(default_factory=list)
+    versions: list[str] = field(default_factory=list)
+    malformed: bool = False
+
+
+def _affected(entries: list[object], ecosystem: str, name: str) -> _Affected:
+    result = _Affected()
+    wanted = normalized_name(ecosystem, name)
+    for entry in entries:
+        try:
+            if not isinstance(entry, dict):
+                raise ValueError("affected entry is not an object")
+            package = entry.get("package")
+            if not isinstance(package, dict):
+                raise ValueError("affected entry has no package")
+            entry_ecosystem, entry_name = package.get("ecosystem"), package.get("name")
+            if not isinstance(entry_ecosystem, str) or not isinstance(entry_name, str):
+                raise ValueError("affected package lacks ecosystem or name")
+            if entry_ecosystem != ecosystem or (
+                normalized_name(entry_ecosystem, entry_name) != wanted
+            ):
+                continue
+            ranges = []
+            for raw_range in entry.get("ranges") or []:
+                events = []
+                for raw_event in raw_range.get("events") or []:
+                    kinds = [k for k in _EVENT_KINDS if k in raw_event]
+                    if len(raw_event) != 1 or len(kinds) != 1:
+                        raise ValueError("range event must have one known field")
+                    events.append(RangeEvent(**{kinds[0]: raw_event[kinds[0]]}))
+                ranges.append(AffectedRange(type=raw_range["type"], events=events))
+            versions = entry.get("versions") or []
+            if not isinstance(versions, list) or not all(
+                isinstance(v, str) for v in versions
+            ):
+                raise ValueError("versions must be a list of strings")
+            result.versions.extend(versions)
+            result.packages.append(
+                AffectedPackage(
+                    ecosystem=entry_ecosystem,
+                    name=entry_name,
+                    ranges=ranges,
+                    listed_versions=len(versions),
+                )
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, ValidationError):
+            result.malformed = True
+    return result
 
 
 class Package(Wire):
@@ -157,6 +224,7 @@ def normalize(
     findings: list[Finding] = []
     sources: dict[str, _Source] = {}
     limitations: list[CoverageNote] = []
+    fix_inputs: dict[int, tuple[str | None, _Affected]] = {}
     output_usable = False
     observed = datetime.now(UTC)
     try:
@@ -262,26 +330,30 @@ def normalize(
                     ):
                         try:
                             advisory = Advisory.model_validate(advisory_raw)
-                            findings.append(
-                                Finding(
-                                    asset=asset,
-                                    component=component,
-                                    vulnerability=Vulnerability(
-                                        primary_id=advisory.id,
-                                        aliases=advisory.aliases,
-                                        title=advisory.summary,
-                                        description=advisory.details,
-                                        references=[r.url for r in advisory.references],
-                                    ),
-                                    evidence=Evidence(
-                                        scanner=identity,
-                                        observed_at=observed,
-                                        target=source.source.path,
-                                        artifact_reference=artifact_reference,
-                                    ),
-                                    fix=FixInformation(),
-                                )
+                            affected = _affected(
+                                advisory.affected, component.ecosystem, component.name
                             )
+                            finding = Finding(
+                                asset=asset,
+                                component=component,
+                                vulnerability=Vulnerability(
+                                    primary_id=advisory.id,
+                                    aliases=advisory.aliases,
+                                    title=advisory.summary,
+                                    description=advisory.details,
+                                    references=[r.url for r in advisory.references],
+                                    affected=affected.packages,
+                                ),
+                                evidence=Evidence(
+                                    scanner=identity,
+                                    observed_at=observed,
+                                    target=source.source.path,
+                                    artifact_reference=artifact_reference,
+                                ),
+                                fix=FixInformation(),
+                            )
+                            findings.append(finding)
+                            fix_inputs[id(finding)] = (relative, affected)
                         except (ValueError, ValidationError):
                             errors.append(
                                 f"source {index} package {package_index} "
@@ -305,6 +377,7 @@ def normalize(
         inventory=inventory,
         limitations=limitations,
     )
+    findings = _with_fixes(findings, fix_inputs, coverage)
     return ScanResult(
         schema_version=CURRENT_SCHEMA_VERSION,
         execution_id=execution_id or str(uuid4()),
@@ -316,6 +389,58 @@ def normalize(
         coverage=coverage,
         provenance=provenance,
     )
+
+
+def _with_fixes(
+    findings: list[Finding],
+    inputs: dict[int, tuple[str | None, _Affected]],
+    coverage: ScanCoverage,
+) -> list[Finding]:
+    """Evaluate fixes only where coverage confirms an exact installed version."""
+    confirmed = {
+        (m.path, normalized_name(p.ecosystem, p.name), p.version)
+        for m in coverage.manifests
+        for p in m.packages
+        if p.confidently_assessed and p.ecosystem and p.version
+    }
+    evaluated = []
+    for finding in findings:
+        relative, affected = inputs[id(finding)]
+        component = finding.component
+        if affected.malformed and component.ecosystem == fixes.ECOSYSTEM:
+            fix = FixInformation(
+                evidence=FixEvidence(
+                    applicability=FixApplicability.UNKNOWN,
+                    reason=FixReason.MALFORMED_AFFECTED,
+                    detail="an affected entry for this package could not be parsed",
+                )
+            )
+        else:
+            fix = fixes.evaluate_fix(
+                affected.packages,
+                ecosystem=component.ecosystem,
+                name=component.name,
+                installed_version=component.installed_version,
+                version_confirmed=(
+                    relative,
+                    normalized_name(component.ecosystem, component.name),
+                    component.installed_version,
+                )
+                in confirmed,
+                listed_in_versions=fixes.listed_in_versions(
+                    affected.versions, component.installed_version
+                ),
+            )
+        evaluated.append(
+            Finding(
+                asset=finding.asset,
+                component=component,
+                vulnerability=finding.vulnerability,
+                evidence=finding.evidence,
+                fix=fix,
+            )
+        )
+    return evaluated
 
 
 def _relative(path: str, target: Path) -> str | None:
