@@ -74,7 +74,8 @@ def _version(text: str) -> Version:
 
 def _containing(affected_range: AffectedRange, installed: Version) -> _Interval | None:
     """Evaluate one ECOSYSTEM range per the OSV schema, with PEP 440 order."""
-    events: list[tuple[Version, int, str, str]] = []
+    # None is "introduced: 0": unbounded below, before even 0.0.dev1.
+    events: list[tuple[Version | None, str, str]] = []
     for event in affected_range.events:
         if event.limit is not None:
             raise _Invalid(
@@ -82,25 +83,26 @@ def _containing(affected_range: AffectedRange, installed: Version) -> _Interval 
             )
         if event.introduced is not None:
             raw, kind = event.introduced, "introduced"
-            key = Version("0") if raw == "0" else _version(raw)
+            key: Version | None = None if raw == "0" else _version(raw)
         elif event.fixed is not None:
             raw, kind, key = event.fixed, "fixed", _version(event.fixed)
         else:
             assert event.last_affected is not None
             raw, kind = event.last_affected, "last_affected"
             key = _version(raw)
-        events.append((key, 0 if kind == "introduced" else 1, kind, raw))
-    if not any(kind == "introduced" for _, _, kind, _ in events):
+        events.append((key, kind, raw))
+    if not any(kind == "introduced" for _, kind, _ in events):
         raise _Invalid(FixReason.INVALID_RANGE, "range has no introduced event")
-    versions = [key for key, _, _, _ in events]
+    versions = [key for key, _, _ in events]
     if len(set(versions)) != len(versions):
         raise _Invalid(FixReason.INVALID_RANGE, "range has events at the same version")
     start: str | None = None
-    for key, _, kind, raw in sorted(events):
+    for key, kind, raw in sorted(events, key=_order):
         if kind == "introduced":
-            if key <= installed and start is None:
+            if (key is None or key <= installed) and start is None:
                 start = raw
         elif start is not None:
+            assert key is not None
             # The first closing event after an applicable introduction ends
             # the interval: either before the installed version, or above it.
             closes_below = key <= installed if kind == "fixed" else key < installed
@@ -111,6 +113,11 @@ def _containing(affected_range: AffectedRange, installed: Version) -> _Interval 
                 return _Interval(introduced=start, fixed=raw)
             return _Interval(introduced=start, last_affected=raw)
     return None if start is None else _Interval(introduced=start)
+
+
+def _order(event: tuple[Version | None, str, str]) -> tuple[bool, Version]:
+    key = event[0]
+    return (key is not None, key if key is not None else Version("0"))
 
 
 def evaluate_fix(
@@ -208,6 +215,19 @@ def evaluate_fix(
             **bounds,
         )
     assert interval.fixed is not None
+    # The candidate must not itself fall inside any range of this advisory.
+    try:
+        still = [r for r in ranges if _containing(r, Version(interval.fixed))]
+    except _Invalid as invalid:
+        return _unknown(invalid.reason, invalid.detail, listed=listed)
+    if still:
+        return _unknown(
+            FixReason.CANDIDATE_STILL_AFFECTED,
+            f"another range still contains the candidate {interval.fixed}",
+            FixApplicability.AFFECTED,
+            listed,
+            **bounds,
+        )
     return FixInformation(
         status=FixStatus.AVAILABLE,
         fixed_versions=[interval.fixed],

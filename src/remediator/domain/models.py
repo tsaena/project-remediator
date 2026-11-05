@@ -121,6 +121,7 @@ class FixReason(StrEnum):
     OPEN_ENDED = "open_ended"
     LAST_AFFECTED_ONLY = "last_affected_only"
     CONFLICTING_RANGES = "conflicting_ranges"
+    CANDIDATE_STILL_AFFECTED = "candidate_still_affected"
     NOT_AFFECTED_BY_RANGES = "not_affected_by_ranges"
     VERSIONS_LIST_DISAGREES = "versions_list_disagrees"
 

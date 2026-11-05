@@ -125,6 +125,9 @@ def test_versions_outside_every_interval_are_not_affected(version: str) -> None:
     [
         # Boundaries: introduced is inclusive, fixed is exclusive.
         ([{"introduced": "0"}, {"fixed": "2.3.0"}], "0.1", FixReason.FIXED_EVENT),
+        # introduced 0 is unbounded below, so pre-releases of 0 are affected.
+        ([{"introduced": "0"}, {"fixed": "1.0"}], "0.0a1", FixReason.FIXED_EVENT),
+        ([{"introduced": "0"}, {"fixed": "1.0"}], "0.0.dev1", FixReason.FIXED_EVENT),
         ([{"introduced": "1.0"}, {"fixed": "2.0"}], "1.0", FixReason.FIXED_EVENT),
         (
             [{"introduced": "1.0"}, {"fixed": "2.0"}],
@@ -178,6 +181,32 @@ def test_range_semantics(
     result = evaluate([package(events)], version)
     assert reason(result) == expected
     assert (result.status == FixStatus.AVAILABLE) == (expected == FixReason.FIXED_EVENT)
+
+
+def test_candidate_still_inside_another_range_is_not_offered() -> None:
+    advisory = [
+        package(
+            [{"introduced": "0"}, {"fixed": "2.0"}],
+            [{"introduced": "1.5"}, {"fixed": "3.0"}],
+        )
+    ]
+    result = evaluate(advisory, "1.0")
+    assert reason(result) == FixReason.CANDIDATE_STILL_AFFECTED
+    assert result.status == FixStatus.UNKNOWN
+    # Separate affected entries of the same package count too.
+    split = [
+        package([{"introduced": "0"}, {"fixed": "2.0"}]),
+        package([{"introduced": "2.0"}, {"last_affected": "2.5"}]),
+    ]
+    assert reason(evaluate(split, "1.0")) == FixReason.CANDIDATE_STILL_AFFECTED
+    # A later range that starts above the candidate does not block it.
+    later = [
+        package(
+            [{"introduced": "0"}, {"fixed": "2.0"}],
+            [{"introduced": "2.1"}, {"fixed": "3.0"}],
+        )
+    ]
+    assert evaluate(later, "1.0").fixed_versions == ["2.0"]
 
 
 def test_overlapping_intervals_report_conflicts_conservatively() -> None:

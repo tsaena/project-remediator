@@ -26,7 +26,7 @@ ranges. Versions are compared with PEP 440 (`packaging`), never lexically, so
 `1.9 < 1.10`, pre-releases sort first, and `2.2 == 2.2.0`.
 
 Following the OSV schema, events are sorted by version. `introduced` is
-inclusive (`0` means every version), `fixed` is exclusive, and `last_affected`
+inclusive (`0` is unbounded below, so it covers even `0.0.dev1`), `fixed` is exclusive, and `last_affected`
 is inclusive. The interval containing the installed version determines the
 result:
 
@@ -36,6 +36,7 @@ result:
 | The interval ends at `last_affected` (names no fix) | `unknown` | `last_affected_only` |
 | The interval has no closing event | `unknown` | `open_ended` |
 | Several containing intervals name different fixes | `unknown` | `conflicting_ranges` |
+| Another range of the same advisory still contains the candidate | `unknown` | `candidate_still_affected` |
 | No range contains the installed version | `unknown` | `not_affected_by_ranges` |
 | The explicit `versions` list and the ranges disagree | `unknown` | `versions_list_disagrees` |
 | No affected entry for this package, or no `ECOSYSTEM` range | `unknown` | `no_matching_package`, `no_supported_range` |
