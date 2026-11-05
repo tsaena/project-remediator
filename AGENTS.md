@@ -17,7 +17,10 @@ workflow; they apply to every agent. Security context for reviews is in
   any other clean-looking result. Safe path: keep the uncertainty explicit as
   `partial`, `failed`, `unknown`, or a limitation with a reason.
 - Flag code that treats an unknown fix as `no_fix`, or that would treat a
-  finding's disappearance as proof of remediation.
+  finding's disappearance as proof of remediation. A correlation entry such as
+  `only_before` is a relationship between observations, never a verdict.
+- Flag correlation changes that turn an uncertain relationship (alias splits or
+  merges, duplicate slots, moved manifests, missing asset keys) into a match.
 
 ### Evidence and provenance
 
