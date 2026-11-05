@@ -192,6 +192,32 @@ def test_duplicate_slots_are_ambiguous(side: str) -> None:
     assert entry.reasons == [CorrelationReason.DUPLICATE_SLOT]
 
 
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_duplicate_slots_count_versions_without_findings(side: str) -> None:
+    """A clean second version has no finding, only a coverage record."""
+    coverage = json.loads(json.dumps(COVERAGE))
+    coverage["manifests"][0]["packages"] = [
+        {
+            "name": "Django",
+            "ecosystem": "PyPI",
+            "version": version,
+            "assessment": "assessed",
+            "version_precision": "exact",
+        }
+        for version in ("2.2.0", "5.0.0")
+    ]
+    split = scan([finding("GHSA-1", version="2.2.0")], coverage=coverage)
+    plain = scan([finding("GHSA-1", version="2.2.0")])
+    pair = (split, plain) if side == "before" else (plain, split)
+    [entry] = correlate(*pair).entries
+    assert entry.kind == CorrelationKind.AMBIGUOUS
+    assert entry.reasons == [CorrelationReason.DUPLICATE_SLOT]
+    # A single coverage version that matches the finding is not a duplicate.
+    assert [e.kind for e in correlate(plain, plain).entries] == [
+        CorrelationKind.MATCHED
+    ]
+
+
 def test_grouping_is_permutation_independent_for_alias_chains() -> None:
     # A-C share X, B-D share Y, C-D share Z: one connected component. OSV-Scanner
     # v2.3.0's own grouper splits this as [A, C, D] + [B] in this input order.

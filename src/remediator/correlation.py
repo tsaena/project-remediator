@@ -296,11 +296,23 @@ class _ScanGroups:
                 by_slot[slot].append(observation)
         self.groups = {slot: _group(slot, obs) for slot, obs in by_slot.items()}
         # Several installed versions in one slot cannot be told apart later.
-        self.duplicates = {
-            slot
-            for slot, obs in by_slot.items()
-            if len({o.installed_version for o in obs}) > 1
-        }
+        # Versions without advisories have no findings, only coverage records.
+        versions: dict[ComponentSlot, set[str]] = defaultdict(set)
+        for slot, obs in by_slot.items():
+            versions[slot].update(o.installed_version for o in obs)
+        for manifest in scan.coverage.manifests if scan.coverage else []:
+            path = manifest_path(manifest.path, scan.asset.locator)
+            for package in manifest.packages:
+                if path is None or not package.ecosystem or not package.version:
+                    continue
+                slot = ComponentSlot(
+                    asset_key=asset_key,
+                    ecosystem=package.ecosystem,
+                    name=normalized_name(package.ecosystem, package.name),
+                    manifest_path=path,
+                )
+                versions[slot].add(package.version)
+        self.duplicates = {slot for slot, seen in versions.items() if len(seen) > 1}
         self.unplaced = [
             group for key in sorted(unplaced) for group in _group(None, unplaced[key])
         ]
