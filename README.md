@@ -104,6 +104,11 @@ See [the domain model guide](docs/domain-model.md) for normalized vulnerability,
 provenance, fix-information, and scan-status contracts and synthetic examples.
 The domain contracts add no HTTP endpoints.
 
+[Finding correlation](docs/correlation.md) relates the findings of two scans of
+the same asset (matched, only before, only after, or ambiguous) and groups
+advisory aliases. It is not verification: a finding that disappeared has not
+been shown to be fixed.
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).

@@ -238,9 +238,9 @@ Known gaps that affect the later stages:
   ecosystems are reported but not vouched for.
 - By default, scans query the live OSV API, which is not a reproducible
   advisory basis. A fingerprinted offline database is optional.
-- Related advisory IDs for the same underlying vulnerability (for example
-  PYSEC and GHSA records that share a CVE) are reported as separate findings.
-- Findings have no identity that can be correlated across scan executions.
+- Findings can be correlated across scans and advisory aliases grouped
+  ([correlation](correlation.md)), but correlation is not verification: no
+  outcome yet establishes that a vulnerability was fixed.
 - Scans honor the repository's `.gitignore` (exclusions are reported, not
   hidden), do not resolve transitive dependencies, and run without OS-level
   isolation.

@@ -19,6 +19,7 @@ from remediator.domain import (
     ManifestInventory,
     VersionPrecision,
 )
+from remediator.naming import canonical_pypi_name
 
 LOCKFILES = frozenset({"Pipfile.lock", "pdm.lock", "poetry.lock", "uv.lock"})
 SUPPORTED_PATTERNS = [
@@ -54,7 +55,7 @@ _COMMENT = re.compile(r"(^|\s)#.*$")
 
 def canonical_name(name: str) -> str:
     """PEP 503 normalization, used only to match declarations to packages."""
-    return re.sub(r"[-_.]+", "-", name).lower()
+    return canonical_pypi_name(name)
 
 
 @dataclass(frozen=True)

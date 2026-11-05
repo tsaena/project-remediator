@@ -59,7 +59,8 @@ and execution is bounded but not isolated.
 
 Progress: scan coverage and provenance ([issue #9](https://github.com/tsaena/project-remediator/issues/9)) records which manifests
 and packages were actually assessed and which scanner, settings, and advisory
-source produced a report. Advisory grouping, finding identity, and fixed
+source produced a report. Finding correlation and advisory grouping ([issue #10](https://github.com/tsaena/project-remediator/issues/10),
+[guide](correlation.md)) relate findings across scans conservatively. Fixed
 versions remain.
 
 **Goal:** trustworthy fixed-version intelligence and stable finding
