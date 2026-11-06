@@ -1005,7 +1005,11 @@ class OSVScanner:
             ["--offline", f"--local-db-path={database}"] if database else []
         )
         # --config is a global override in v2.3.0, not a default/fallback config.
-        with TemporaryDirectory(prefix="remediator-osv-") as controlled:
+        with TemporaryDirectory(prefix="remediator-osv-") as created:
+            # The system temp root may sit behind a symlink (macOS: /var ->
+            # /private/var). Resolve this adapter-created directory once so the
+            # no-symlink output check applies to the real path.
+            controlled = os.path.realpath(created)
             config = Path(controlled) / "osv-scanner.toml"
             with private_output(config) as handle:
                 handle.write(CONFIGURATION)

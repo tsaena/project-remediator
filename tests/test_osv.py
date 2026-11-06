@@ -392,6 +392,37 @@ sys.exit(1)
     assert result.findings[0].component.location == str(nested / "requirements.txt")
 
 
+def test_temp_root_behind_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """macOS puts TMPDIR under /var, a symlink to /private/var."""
+    import tempfile
+
+    real = tmp_path / "private-tmp"
+    real.mkdir()
+    (tmp_path / "tmp-link").symlink_to(real)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp-link"))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    target = tmp_path / "repo"
+    target.mkdir()
+    executable = fake_scanner(
+        tmp_path,
+        f"""
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+config = Path(args[args.index('--config') + 1])
+assert config.parent.resolve() == config.parent
+assert config.parent.parent == Path({str(real)!r})
+sys.stdout.buffer.write({(FIXTURES / "single.json").read_bytes()!r})
+sys.exit(1)
+""",
+    )
+    result = OSVScanner(executable).scan(target, artifact_directory=tmp_path / "raw")
+    assert result.status == "success"
+    assert not list(real.iterdir())
+
+
 @pytest.mark.skipif(
     os.getenv("RUN_OSV_INTEGRATION") != "1", reason="opt-in real scanner"
 )
