@@ -1,5 +1,23 @@
 services:
   api:
     build: .
+    image: project-remediator:local
     ports:
       - "127.0.0.1:8000:8000"
+
+  # One-off scans: docker compose run --rm -v "$PWD/repo:/target:ro" scan /target
+  # Only started explicitly; `docker compose up` runs the API alone.
+  scan:
+    profiles: ["scan"]
+    build: .
+    image: project-remediator:local
+    entrypoint: ["python", "-m", "remediator.cli"]
+    command: ["--help"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./scan-out:/out

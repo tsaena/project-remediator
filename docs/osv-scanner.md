@@ -37,6 +37,47 @@ schema version 3 and also carry [coverage evidence](#coverage-evidence),
 [provenance](#provenance), including the scanner version that `--version`
 reported (never inferred from the executable name).
 
+## Container scans
+
+The image ships OSV-Scanner v2.3.0 at `/usr/local/bin/osv-scanner`: the official
+Linux binary for the build architecture (amd64 or arm64), verified at build time
+against a SHA-256 pinned in the `Dockerfile` (`ADD --checksum`; a mismatch fails
+the build). It is root-owned and not writable by the runtime user, and it is the
+CLI's default executable, so container scans never depend on a host-installed
+scanner. The scanner version is recorded in every report's provenance.
+
+The Compose `scan` service uses the same image under a profile, so
+`docker compose up` still starts only the API. It runs with a read-only root
+filesystem, a tmpfs `/tmp`, all capabilities dropped and `no-new-privileges`.
+Mount the target read-only at `/target`; reports and artifacts go to `/out`
+(`./scan-out` on the host):
+
+```sh
+mkdir -p scan-out
+docker compose --profile scan run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/path/to/repo:/target:ro" \
+  scan /target --artifacts /out/artifacts --asset-key my/repo \
+  --output /out/report.json
+```
+
+`--user` makes output files belong to you on Linux; Docker Desktop (macOS,
+Windows) does not need it. An online scan needs outbound HTTPS to the OSV API.
+For an offline scan, mount a database read-only and pass it explicitly; the
+container then needs no network at all:
+
+```sh
+docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL \
+  --security-opt no-new-privileges:true --user "$(id -u):$(id -g)" \
+  -v "$PWD/path/to/repo:/target:ro" -v "$PWD/osvdb:/osvdb:ro" \
+  -v "$PWD/scan-out:/out" --entrypoint python project-remediator:local \
+  -m remediator.cli /target --artifacts /out/artifacts \
+  --offline-database /osvdb --output /out/report.json
+```
+
+No database is bundled in the image: it would go stale silently. CI builds the
+image and scans `tests/fixtures/vulnerable-python` in the container. A
+host-installed scanner (`--executable`) remains the option for local development.
+
 ## Execution and artifacts
 
 The command is an explicit argument list with `shell=False`:

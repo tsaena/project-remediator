@@ -71,6 +71,20 @@ bind mounts, or auto-reload. Stop with Ctrl-C, then remove the container with:
 docker compose down
 ```
 
+The image also contains a checksum-pinned OSV-Scanner v2.3.0, so scans can run
+in a hardened container (read-only root filesystem, read-only target, no
+capabilities) instead of depending on a host-installed scanner:
+
+```sh
+mkdir -p scan-out
+docker compose --profile scan run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/path/to/repo:/target:ro" \
+  scan /target --artifacts /out/artifacts --output /out/report.json
+```
+
+See [container scans](docs/osv-scanner.md#container-scans) for offline,
+network-free scans.
+
 ## Verification
 
 ```sh

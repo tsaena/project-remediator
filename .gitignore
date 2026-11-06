@@ -13,3 +13,4 @@ build/
 
 # Local sensitive scanner artifacts
 .remediator-artifacts/
+scan-out/
