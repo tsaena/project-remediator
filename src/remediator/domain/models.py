@@ -69,9 +69,17 @@ class AffectedPackage(DomainModel):
     ecosystem: NonBlank
     name: NonBlank
     ranges: list[AffectedRange] = Field(default_factory=list)
-    # How many versions the advisory lists explicitly; the list itself stays
-    # in the raw scanner artifact.
+    # How many versions the advisory lists explicitly.
     listed_versions: int = Field(default=0, ge=0)
+    # The explicitly listed versions as reported (schema 4); None in older
+    # reports, where only the count was kept.
+    versions: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_versions(self) -> Self:
+        if self.versions is not None and len(self.versions) != self.listed_versions:
+            raise ValueError("listed_versions must count the listed versions")
+        return self
 
 
 class Vulnerability(DomainModel):
@@ -402,12 +410,12 @@ class ScanProvenance(DomainModel):
         return self
 
 
-CURRENT_SCHEMA_VERSION: Literal[3] = 3
+CURRENT_SCHEMA_VERSION: Literal[4] = 4
 
 
 class ScanResult(DomainModel):
     # Reports without this field predate coverage and provenance (version 1).
-    schema_version: Literal[1, 2, 3] = 1
+    schema_version: Literal[1, 2, 3, 4] = 1
     execution_id: NonBlank
     asset: Asset
     scanner: Scanner
@@ -438,6 +446,12 @@ class ScanResult(DomainModel):
             f.vulnerability.affected or f.fix.evidence for f in self.findings
         ):
             raise ValueError("affected ranges and fix evidence need schema 3")
+        if self.schema_version < 4 and any(
+            a.versions is not None
+            for f in self.findings
+            for a in f.vulnerability.affected
+        ):
+            raise ValueError("listed affected versions need schema 4")
         if (
             self.coverage is not None
             and self.status != ScanStatus.SUCCESS

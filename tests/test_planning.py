@@ -33,18 +33,19 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def advisory(
-    identifier: str, *ranges: list[dict[str, str]], name: str = "django", **extra: Any
+    identifier: str,
+    *ranges: list[dict[str, str]],
+    name: str = "django",
+    versions: list[str] | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
-    return {
-        "id": identifier,
-        "affected": [
-            {
-                "package": {"ecosystem": "PyPI", "name": name},
-                "ranges": [{"type": "ECOSYSTEM", "events": e} for e in ranges],
-            }
-        ],
-        **extra,
+    entry: dict[str, Any] = {
+        "package": {"ecosystem": "PyPI", "name": name},
+        "ranges": [{"type": "ECOSYSTEM", "events": e} for e in ranges],
     }
+    if versions is not None:
+        entry["versions"] = versions
+    return {"id": identifier, "affected": [entry], **extra}
 
 
 def scan(
@@ -180,6 +181,79 @@ def test_highest_candidate_inside_another_advisory_is_refused(tmp_path: Path) ->
     )
     assert entry.refusal == RefusalReason.TARGET_STILL_AFFECTED
     assert entry.change is None and "PYSEC-2" in entry.detail
+
+
+def listed_conflict(tmp_path: Path) -> ScanResult:
+    # PYSEC-1's range ends at 2.0, but it explicitly lists 3.0 as affected;
+    # PYSEC-2's fix is 3.0. Ranges alone would clear 3.0.
+    advisories = [
+        advisory(
+            "PYSEC-1",
+            [{"introduced": "0"}, {"fixed": "2.0"}],
+            versions=["1.0", "3.0"],
+        ),
+        advisory("PYSEC-2", [{"introduced": "0"}, {"fixed": "3.0"}], versions=["1.0"]),
+    ]
+    return scan(
+        tmp_path, "requirements.txt", "Django==1.0\n", [("Django", "1.0", advisories)]
+    )
+
+
+def test_target_explicitly_listed_as_affected_is_refused(tmp_path: Path) -> None:
+    result = listed_conflict(tmp_path)
+    assert [f.fix.fixed_versions for f in result.findings] == [["2.0"], ["3.0"]]
+    entry = only(result)
+    assert entry.refusal == RefusalReason.TARGET_STILL_AFFECTED
+    assert "PYSEC-1 explicitly lists 3.0" in entry.detail
+
+
+def test_reports_without_listed_versions_cannot_clear_a_target(tmp_path: Path) -> None:
+    """Schema 3 kept only the count of listed versions."""
+    result = scan(
+        tmp_path,
+        "requirements.txt",
+        "Django==2.2.0\n",
+        [
+            (
+                "Django",
+                "2.2.0",
+                [
+                    {
+                        **DJANGO_22,
+                        "affected": [
+                            {**DJANGO_22["affected"][0], "versions": ["2.2.0"]}
+                        ],
+                    }
+                ],
+            )
+        ],
+    )
+
+    def schema_three(data: dict[str, Any]) -> None:
+        data["schema_version"] = 3
+        for finding in data["findings"]:
+            for affected in finding["vulnerability"]["affected"]:
+                affected.pop("versions")
+
+    old = tampered(result, schema_three)
+    assert old.findings[0].vulnerability.affected[0].listed_versions == 1
+    assert only(result).decision == PlanDecision.PROPOSED
+    entry = only(old)
+    assert entry.refusal == RefusalReason.TARGET_UNVERIFIABLE
+
+
+def test_listed_versions_need_schema_four_and_a_matching_count(
+    tmp_path: Path,
+) -> None:
+    payload = listed_conflict(tmp_path).model_dump(mode="json")
+    assert payload["schema_version"] == 4
+    payload["schema_version"] = 3
+    with pytest.raises(ValidationError, match="schema 4"):
+        ScanResult.model_validate(payload)
+    payload["schema_version"] = 4
+    payload["findings"][0]["vulnerability"]["affected"][0]["listed_versions"] = 1
+    with pytest.raises(ValidationError, match="count"):
+        ScanResult.model_validate(payload)
 
 
 def test_any_group_without_a_candidate_refuses_the_package(tmp_path: Path) -> None:

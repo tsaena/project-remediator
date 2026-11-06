@@ -37,11 +37,14 @@ proposal only if every check passes, in this order:
 | No advisory group disagrees on a fix ([group status](fixes.md#advisory-groups) `conflict`) | `conflicting_advisories` |
 | Every advisory group has a candidate (none is `unknown`) | `no_fix_candidate` |
 | The highest candidate is newer than the installed version | `target_not_newer` |
-| No range of any advisory for the package contains the highest candidate | `target_still_affected`, `target_unverifiable` |
+| No range or explicit `versions` list of any advisory for the package contains the highest candidate | `target_still_affected`, `target_unverifiable` |
 
 The last check matters. Choosing the highest fixed version is safe only if no
-advisory is reintroduced at that version, so the planner re-evaluates it
-against every range with the same PEP 440 logic as [fixes](fixes.md). If any
+advisory still affects that version, so the planner re-evaluates it against
+every range (with the same PEP 440 logic as [fixes](fixes.md)) and against each
+advisory's explicit `versions` list: an advisory can list a version as affected
+that its ranges would clear. Reports before schema 4 kept only the size of that
+list, so a target can't be cleared from them (`target_unverifiable`). If any
 group lacks a candidate, the whole slot is refused, so a proposal never
 knowingly leaves an advisory open. Partial upgrades are deferred.
 

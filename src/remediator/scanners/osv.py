@@ -155,6 +155,7 @@ def _affected(entries: list[object], ecosystem: str, name: str) -> _Affected:
                     name=entry_name,
                     ranges=ranges,
                     listed_versions=len(versions),
+                    versions=versions,
                 )
             )
         except (AttributeError, KeyError, TypeError, ValueError, ValidationError):

@@ -33,6 +33,7 @@ from remediator.domain import (
     AdvisorySource,
     Asset,
     CoverageStatus,
+    Finding,
     FixApplicability,
     PackageCoverage,
     Scanner,
@@ -46,6 +47,7 @@ from remediator.fixes import (
     GroupFixStatus,
     evaluate_fix,
     group_fix,
+    listed_in_versions,
 )
 from remediator.naming import canonical_pypi_name
 from remediator.output import private_output
@@ -238,6 +240,27 @@ def _plan_groups(groups: list[AdvisoryGroup], scan: ScanResult) -> list[PlanGrou
     ]
 
 
+def _listed(finding: Finding, version: str) -> bool | None:
+    """Whether the advisory explicitly lists ``version`` as affected.
+
+    Raises when the report counts listed versions but did not keep them
+    (reports before schema 4): ranges alone cannot clear such a version.
+    """
+    relevant = [
+        a
+        for a in finding.vulnerability.affected
+        if a.ecosystem == ECOSYSTEM
+        and canonical_pypi_name(a.name) == canonical_pypi_name(finding.component.name)
+    ]
+    if any(a.listed_versions and a.versions is None for a in relevant):
+        raise _Refused(
+            RefusalReason.TARGET_UNVERIFIABLE,
+            f"{finding.vulnerability.primary_id} lists affected versions that the "
+            "report does not include",
+        )
+    return listed_in_versions([v for a in relevant for v in a.versions or []], version)
+
+
 def _check_evidence(scan: ScanResult, indices: Iterable[int], version: str) -> None:
     """Recompute each finding's fix from its advisory ranges; reports are input."""
     for index in indices:
@@ -247,7 +270,11 @@ def _check_evidence(scan: ScanResult, indices: Iterable[int], version: str) -> N
                 RefusalReason.NO_FIX_CANDIDATE,
                 f"{finding.vulnerability.primary_id} carries no fix evidence",
             )
-        listed = finding.fix.evidence.listed_in_versions
+        try:
+            listed = _listed(finding, version)
+        except _Refused:
+            # Older reports: only the recorded answer for the installed version.
+            listed = finding.fix.evidence.listed_in_versions
         expected = evaluate_fix(
             finding.vulnerability.affected,
             ecosystem=finding.component.ecosystem,
@@ -295,6 +322,12 @@ def _target(
     # The highest candidate must lie outside every range of every advisory.
     for index in indices:
         finding = scan.findings[index]
+        if _listed(finding, target):
+            raise _Refused(
+                RefusalReason.TARGET_STILL_AFFECTED,
+                f"{finding.vulnerability.primary_id} explicitly lists {target} as "
+                "affected",
+            )
         check = evaluate_fix(
             finding.vulnerability.affected,
             ecosystem=finding.component.ecosystem,
@@ -385,7 +418,8 @@ def _entry(
     return entry(
         PlanDecision.PROPOSED,
         f"every advisory group reports a fix at or below {target}, and no "
-        "advisory range contains it; not proof that it exists, installs, or works",
+        "advisory range or version list contains it; not proof that it exists, "
+        "installs, or works",
         change=PlannedChange(
             manifest_path=slot.manifest_path,
             package=first.name,
