@@ -1,10 +1,10 @@
 # Project Remediator
 
 An open-source vulnerability remediation and verification engine, currently at
-the local dependency-scanning stage. A health endpoint, scanner-independent
-domain models, a developer OSV-Scanner CLI, and development tooling are
-implemented. Remediation, verification, storage, workers, and AI integrations
-are not implemented.
+the remediation-planning stage. A health endpoint, scanner-independent domain
+models, an OSV-Scanner CLI (host or container), non-executing remediation plans,
+and development tooling are implemented. Applying changes, verification,
+storage, workers, and AI integrations are not implemented.
 
 **Experimental and not production-ready.**
 
@@ -124,6 +124,9 @@ advisory aliases. It is not verification: a finding that disappeared has not
 been shown to be fixed. [Fixed-version candidates](docs/fixes.md) are derived
 for exactly pinned PyPI packages from each advisory's own ranges; a candidate is
 reported evidence, not proof that an upgrade exists or works.
+[Remediation plans](docs/planning.md) turn those candidates into reviewable
+upgrade proposals for pinned requirements, refusing explicitly whenever the
+evidence is missing or ambiguous; nothing is edited.
 
 ## License
 

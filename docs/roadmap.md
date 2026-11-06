@@ -15,8 +15,8 @@ is fixed when the issue is written, not here.
 | 2 | Domain contracts | Normalize | ✅ |
 | 3 | First scanner integration | Detect, Normalize | ✅ |
 | 4 | Remediation prerequisites | Normalize → Plan, Verify | ✅ |
-| 5 | Deterministic remediation planning | Plan | 🔜 |
-| 6 | Remediation application | Apply | ⏳ |
+| 5 | Deterministic remediation planning | Plan | ✅ |
+| 6 | Remediation application | Apply | 🔜 |
 | 7 | Independent verification | Verify | ⏳ |
 | 8 | Expanded integrations and automation | All | ⏳ |
 
@@ -84,7 +84,12 @@ supports them; alias groups and finding identity are deterministic and tested
 against real scanner output; scan results carry the provenance needed to say
 whether two executions are comparable.
 
-## 🔜 Milestone 5 — Deterministic remediation planning
+## ✅ Milestone 5 — Deterministic remediation planning
+
+Progress: [remediation plans](planning.md) ([issue #17](https://github.com/tsaena/project-remediator/issues/17)) propose
+an upgrade for exactly pinned requirements only when every advisory agrees and
+the target escapes every advisory range, and refuse with a reason otherwise.
+Scans also run in a hardened container with a pinned scanner ([issue #16](https://github.com/tsaena/project-remediator/issues/16)).
 
 **Goal:** explainable, non-executing remediation proposals for supported
 dependency ecosystems, starting with a narrow Python dependency use case (for
@@ -98,7 +103,7 @@ candidate are reported as such rather than guessed.
 specific upgrades with evidence, and refuses to propose one when fix data is
 missing or ambiguous.
 
-## ⏳ Milestone 6 — Remediation application
+## 🔜 Milestone 6 — Remediation application
 
 **Goal:** controlled, human-approved dependency modifications.
 
