@@ -24,4 +24,21 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest
-      - run: docker build -t project-remediator:ci .
+      - run: docker compose build
+      - name: Containerized scan of the vulnerable fixture
+        run: |
+          mkdir scan-out
+          docker compose --profile scan run --rm --user "$(id -u):$(id -g)" \
+            -v "$PWD/tests/fixtures/vulnerable-python:/target:ro" \
+            scan /target --artifacts /out/artifacts \
+            --asset-key ci/vulnerable-python --output /out/report.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open("scan-out/report.json"))
+          assert report["status"] == "success", report["status"]
+          assert report["scanner"]["version"] == "2.3.0", report["scanner"]
+          assert report["coverage"]["status"] == "no_known_gaps"
+          names = {f["component"]["name"].lower() for f in report["findings"]}
+          assert names == {"django"}, names
+          print(len(report["findings"]), "findings")
+          PY

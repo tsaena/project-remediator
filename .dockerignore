@@ -12,3 +12,4 @@ tests
 dist
 build
 *.egg-info
+scan-out
