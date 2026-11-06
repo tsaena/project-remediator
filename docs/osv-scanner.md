@@ -32,7 +32,7 @@ scans or invalid CLI configuration. A typical finding includes:
 Actual output also contains advisory IDs/aliases, source text and references,
 repository asset, execution ID, scanner identity, UTC observation time and an
 artifact URI. Advisory IDs and package spelling are preserved. Reports use
-schema version 3 and also carry [coverage evidence](#coverage-evidence),
+schema version 4 and also carry [coverage evidence](#coverage-evidence),
 [fixed-version candidates](fixes.md), and
 [provenance](#provenance), including the scanner version that `--version`
 reported (never inferred from the executable name).

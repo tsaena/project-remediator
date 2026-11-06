@@ -269,7 +269,7 @@ def _group(
     return sorted(groups, key=lambda g: g.advisory_ids)
 
 
-class _ScanGroups:
+class ScanGroups:
     """One scan's findings, grouped per slot."""
 
     def __init__(self, scan: ScanResult, asset_key: str) -> None:
@@ -316,7 +316,7 @@ class _ScanGroups:
 
 def group_advisories(scan: ScanResult, asset_key: str) -> list[AdvisoryGroup]:
     """All advisory groups of one scan, ordered by slot and advisory IDs."""
-    groups = _ScanGroups(scan, asset_key)
+    groups = ScanGroups(scan, asset_key)
     ordered = [
         g for slot in sorted(groups.groups, key=_slot_key) for g in groups.groups[slot]
     ]
@@ -443,8 +443,8 @@ def correlate(before: ScanResult, after: ScanResult) -> Correlation:
             status=ComparabilityStatus.UNAVAILABLE, restrictions=restrictions
         )
     assert before.asset.key is not None
-    earlier = _ScanGroups(before, before.asset.key)
-    later = _ScanGroups(after, before.asset.key)
+    earlier = ScanGroups(before, before.asset.key)
+    later = ScanGroups(after, before.asset.key)
     entries: list[CorrelationEntry] = []
     for slot in sorted(set(earlier.groups) | set(later.groups), key=_slot_key):
         left = earlier.groups.get(slot, [])

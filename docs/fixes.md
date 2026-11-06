@@ -50,11 +50,13 @@ at 2.1.0. That disagreement stays `unknown`.
 
 ## What a report records
 
-Schema version 3 adds two optional fields:
+Schema version 3 adds two optional fields, and schema version 4 keeps each
+affected entry's explicitly listed `versions` (older reports kept only their
+count):
 
 - `vulnerability.affected`: the advisory's affected entries for the finding's
   package, with every range and its events as reported (including non-ECOSYSTEM
-  ranges) and the count of explicitly listed versions. The full advisory stays
+  ranges) and the explicitly listed versions with their count. The full advisory stays
   in the raw `stdout.json` artifact.
 - `fix.evidence`: `applicability` (`affected`, `not_affected`, or `unknown`),
   `reason`, a `detail`, the `introduced`/`fixed`/`last_affected` bounds of the
